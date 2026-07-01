@@ -15,65 +15,6 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
-function NodesCanvas() {
-  const ref = useRef<HTMLCanvasElement | null>(null);
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    let raf = 0;
-    const resize = () => {
-      canvas.width = canvas.clientWidth * window.devicePixelRatio;
-      canvas.height = canvas.clientHeight * window.devicePixelRatio;
-    };
-    resize();
-    window.addEventListener("resize", resize);
-    type Node = { x: number; y: number; vx: number; vy: number };
-    const nodes: Node[] = Array.from({ length: 22 }, () => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.3,
-      vy: (Math.random() - 0.5) * 0.3,
-    }));
-    const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const max = 160 * window.devicePixelRatio;
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        n.x += n.vx;
-        n.y += n.vy;
-        if (n.x < 0 || n.x > canvas.width) n.vx *= -1;
-        if (n.y < 0 || n.y > canvas.height) n.vy *= -1;
-        for (let j = i + 1; j < nodes.length; j++) {
-          const m = nodes[j];
-          const dx = n.x - m.x, dy = n.y - m.y;
-          const d = Math.hypot(dx, dy);
-          if (d < max) {
-            const alpha = (1 - d / max) * 0.5;
-            ctx.strokeStyle = `rgba(227,6,19,${alpha})`;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(n.x, n.y);
-            ctx.lineTo(m.x, m.y);
-            ctx.stroke();
-          }
-        }
-        ctx.fillStyle = "rgba(227,6,19,0.55)";
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, 3 * window.devicePixelRatio, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      raf = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", resize);
-    };
-  }, []);
-  return <canvas ref={ref} className="absolute inset-0 h-full w-full" />;
-}
 
 function LoginPage() {
   const { login, user } = useAuth();
