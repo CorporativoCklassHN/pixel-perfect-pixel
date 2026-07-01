@@ -185,8 +185,8 @@ function Solicitar() {
           </div>
         </div>
         <div className="mx-auto mt-3 flex max-w-6xl flex-wrap items-center justify-between gap-3">
-          <span className="ckl-badge" style={{ background: requiresFin ? "#FEF3C7" : "#D8F3DC", color: requiresFin ? "#B45309" : "#2D6A4F" }}>
-            {requiresFin ? "⚠ Requiere aprobación de Finanzas" : "✓ Aprobación por Jefe Inmediato"}
+          <span className="ckl-badge" style={{ background: requiresFin ? "#FEF3C7" : "#DCFCE7", color: requiresFin ? "#D97706" : "#16A34A" }}>
+            {requiresFin ? "Requiere aprobación: Jefe Inmediato + Finanzas" : "Requiere aprobación: Jefe Inmediato"}
           </span>
           <div className="flex gap-2">
             <button onClick={() => nav({ to: "/estatus" })} className="ckl-btn-outline">Cancelar</button>
