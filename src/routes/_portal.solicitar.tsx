@@ -86,11 +86,11 @@ function Solicitar() {
 
   const guardar = () => {
     if (!motivo.trim()) return toast.error("Captura el motivo del viaje.");
-    const resumen = destinos.map((d) => d.estado).join(" → ");
+    const resumen = destinos.map((d) => d.estado).join(" - ");
     const sol: Solicitud = {
       id: uid("s_"), folio, user_id: user!.id, fecha: today,
       empresa: user!.empresa, origen,
-      destino_resumen: `${origen} → ${resumen}`,
+      destino_resumen: `${origen} - ${resumen}`,
       tipo_viaje: tipo, motivo,
       personas_count: personas, personas_nombres: nombres,
       monto_total: totals.total,
