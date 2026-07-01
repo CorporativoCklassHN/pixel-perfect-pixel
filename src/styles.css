@@ -7,9 +7,9 @@
 @theme inline {
   --radius-sm: 4px;
   --radius-md: 6px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
-  --radius-2xl: 18px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-2xl: 10px;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -42,45 +42,45 @@
   --color-sidebar-hover: var(--sidebar-hover);
   --color-sidebar-active: var(--sidebar-active);
   --color-sidebar-border: var(--sidebar-border);
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "DM Serif Display", ui-serif, Georgia, serif;
+  --font-sans: "Segoe UI", Arial, sans-serif;
+  --font-serif: "Segoe UI", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(0.985 0.002 247);   /* #F8F9FA */
-  --foreground: oklch(0.18 0 0);           /* #111111 */
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0 0);
+  --radius: 0.5rem;
+  --background: oklch(0.955 0 0);          /* #F2F2F2 */
+  --foreground: oklch(0.15 0 0);           /* #111111 */
+  --card: oklch(1 0 0);                    /* #FFFFFF */
+  --card-foreground: oklch(0.15 0 0);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0 0);
+  --popover-foreground: oklch(0.15 0 0);
   --primary: oklch(0.555 0.222 27.5);      /* #E30613 */
   --primary-foreground: oklch(1 0 0);
   --primary-hover: oklch(0.475 0.215 27);  /* #B5040F */
-  --primary-soft: oklch(0.945 0.035 22);   /* #FEE9EA */
-  --secondary: oklch(0.97 0.003 247);      /* #F1F3F5 */
-  --secondary-foreground: oklch(0.18 0 0);
-  --muted: oklch(0.97 0.003 247);
-  --muted-foreground: oklch(0.45 0.008 247);
-  --accent: oklch(0.945 0.035 22);
-  --accent-foreground: oklch(0.475 0.215 27);
+  --primary-soft: oklch(0.96 0.02 22);     /* #FFF5F5 */
+  --secondary: oklch(0.955 0 0);           /* #F1F1F1 */
+  --secondary-foreground: oklch(0.15 0 0);
+  --muted: oklch(0.955 0 0);
+  --muted-foreground: oklch(0.35 0 0);     /* dark gray, still legible */
+  --accent: oklch(0.96 0.02 22);
+  --accent-foreground: oklch(0.15 0 0);
   --destructive: oklch(0.555 0.222 27.5);
   --destructive-foreground: oklch(1 0 0);
-  --success: oklch(0.45 0.13 156);          /* #2D6A4F */
-  --success-soft: oklch(0.93 0.075 156);   /* #D8F3DC */
-  --warning: oklch(0.55 0.13 65);           /* #B45309 */
-  --warning-soft: oklch(0.94 0.06 85);     /* #FEF3C7 */
-  --info: oklch(0.48 0.21 265);             /* #1D4ED8 */
-  --info-soft: oklch(0.93 0.045 255);      /* #DBEAFE */
-  --border: oklch(0.92 0.005 250);          /* #E9ECEF */
-  --input: oklch(0.92 0.005 250);
+  --success: oklch(0.55 0.15 156);         /* #16A34A */
+  --success-soft: oklch(0.955 0.06 156);   /* #DCFCE7 */
+  --warning: oklch(0.62 0.15 65);          /* #D97706 */
+  --warning-soft: oklch(0.955 0.05 85);    /* #FEF3C7 */
+  --info: oklch(0.48 0.15 245);            /* #0369A1 */
+  --info-soft: oklch(0.95 0.035 235);      /* #E0F2FE */
+  --border: oklch(0.87 0 0);               /* #DDDDDD */
+  --input: oklch(0.87 0 0);
   --ring: oklch(0.555 0.222 27.5);
   --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.22 0 0);
-  --sidebar-hover: oklch(0.965 0.003 247);
-  --sidebar-active: oklch(0.945 0.035 22);
-  --sidebar-border: oklch(0.92 0.005 250);
+  --sidebar-foreground: oklch(0.15 0 0);
+  --sidebar-hover: oklch(0.97 0 0);
+  --sidebar-active: oklch(0.96 0.02 22);
+  --sidebar-border: oklch(0.87 0 0);
 }
 
 @layer base {
@@ -91,32 +91,47 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
-  h1, h2, h3, h4 { color: var(--color-foreground); }
+  h1, h2, h3, h4, h5, h6, p, span, a, label, li, td, th, button, input, select, textarea {
+    color: var(--color-foreground);
+  }
   input:focus, select:focus, textarea:focus {
     outline: none;
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px rgba(227, 6, 19, 0.1);
+    box-shadow: none;
   }
 }
 
 @layer components {
   .ckl-logo {
-    font-family: var(--font-serif);
-    background: var(--color-primary);
-    color: white;
-    border-radius: 8px;
-    padding: 7px 10px;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
     line-height: 1;
-    display: inline-block;
+    gap: 2px;
+  }
+  .ckl-logo-mark {
+    background: var(--color-primary);
+    color: #FFFFFF;
+    font-weight: 700;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 18px;
+    line-height: 1;
     letter-spacing: 0.5px;
+  }
+  .ckl-logo-text {
+    color: #6B7280;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: lowercase;
   }
   .ckl-card {
     background: var(--color-card);
     border: 1px solid var(--color-border);
-    border-radius: 10px;
+    border-radius: 8px;
   }
   .ckl-input {
-    background: white;
+    background: #FFFFFF;
     border: 1px solid var(--color-border);
     border-radius: 6px;
     padding: 8px 12px;
@@ -134,12 +149,11 @@
   }
   .ckl-btn-primary {
     background: var(--color-primary);
-    color: white;
+    color: #FFFFFF;
     border-radius: 6px;
     padding: 9px 16px;
     font-weight: 600;
     font-size: 14px;
-    transition: background 0.15s;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -147,9 +161,9 @@
   .ckl-btn-primary:hover { background: var(--color-primary-hover); }
   .ckl-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
   .ckl-btn-outline {
-    background: white;
-    color: var(--color-primary);
-    border: 1px solid var(--color-primary);
+    background: #F1F1F1;
+    color: var(--color-foreground);
+    border: 1px solid var(--color-border);
     border-radius: 6px;
     padding: 8px 16px;
     font-weight: 600;
@@ -158,22 +172,23 @@
     align-items: center;
     gap: 6px;
   }
-  .ckl-btn-outline:hover { background: var(--color-primary-soft); }
+  .ckl-btn-outline:hover { background: #E5E5E5; }
   .ckl-btn-ghost {
-    background: var(--color-secondary);
+    background: #F1F1F1;
     color: var(--color-foreground);
+    border: 1px solid var(--color-border);
     border-radius: 6px;
     padding: 8px 14px;
     font-weight: 500;
     font-size: 14px;
   }
-  .ckl-btn-ghost:hover { background: var(--color-border); }
+  .ckl-btn-ghost:hover { background: #E5E5E5; }
   .ckl-badge {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     padding: 3px 8px;
-    border-radius: 999px;
+    border-radius: 4px;
     font-size: 11px;
     font-weight: 600;
   }

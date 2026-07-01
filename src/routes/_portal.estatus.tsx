@@ -151,8 +151,8 @@ function Estatus() {
                     <td className="p-3"><StatusBadge estatus={s.finanzas_status} /></td>
                     <td className="p-3">
                       {s.comprobante_viaje
-                        ? <span className="ckl-badge" style={{ background: "#D8F3DC", color: "#2D6A4F" }}>✓ {s.comprobante_viaje}</span>
-                        : <span className="ckl-badge" style={{ background: "#FEE9EA", color: "#E30613" }}>✗ Vacío</span>}
+                        ? <span className="ckl-badge" style={{ background: "#DCFCE7", color: "#16A34A" }}>Cargado {s.comprobante_viaje}</span>
+                        : <span className="ckl-badge" style={{ background: "#FEE2E2", color: "#DC2626" }}>Sin cargar</span>}
                     </td>
                     <td className="p-3">{s.nota_rechazo && <MessageSquareWarning size={16} className="text-[color:var(--color-primary)]" />}</td>
                     <td className="p-3"><StatusBadge estatus={s.estatus} /></td>

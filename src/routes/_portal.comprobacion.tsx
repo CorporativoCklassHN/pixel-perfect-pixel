@@ -189,8 +189,8 @@ function Comprobacion() {
         </div>
         <div className="ckl-card p-4" style={{ borderLeft: "4px solid var(--color-primary)" }}>
           <div className="text-sm font-semibold">Depósito sobrante</div>
-          <div className="mt-2 rounded-md p-2 text-xs" style={{ background: "#FEF3C7", color: "#B45309" }}>
-            ⚠ Es obligatorio reintegrar el sobrante con comprobante bancario.
+          <div className="mt-2 rounded-md p-2 text-xs" style={{ background: "#FEF3C7", color: "#D97706" }}>
+            Es obligatorio reintegrar el sobrante con comprobante bancario.
           </div>
           <div className="mt-3 flex gap-2">
             <input className="ckl-input" placeholder="Monto a reintegrar" />

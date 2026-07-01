@@ -48,7 +48,10 @@ export function PortalLayout() {
   const Sidebar = (
     <aside className="flex h-full w-[220px] shrink-0 flex-col border-r" style={{ background: "var(--color-sidebar)", borderColor: "var(--color-sidebar-border)" }}>
       <div className="flex items-center gap-3 p-4">
-        <span className="ckl-logo text-lg">CKL</span>
+        <span className="ckl-logo">
+          <span className="ckl-logo-mark">C</span>
+          <span className="ckl-logo-text">cklass</span>
+        </span>
         <div>
           <div className="text-sm font-semibold">Portal Viáticos</div>
           <div className="text-[11px] text-muted-foreground">Grupo Cklass</div>

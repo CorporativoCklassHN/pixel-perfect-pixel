@@ -111,7 +111,7 @@ function Dashboard() {
       <div className="ckl-card overflow-hidden">
         <div className="flex items-center justify-between border-b p-4">
           <div className="text-sm font-semibold">Solicitudes recientes</div>
-          <Link to="/estatus" className="text-xs font-semibold" style={{ color: "var(--color-primary)" }}>Ver todas →</Link>
+          <Link to="/estatus" className="text-xs font-semibold" style={{ color: "var(--color-primary)" }}>Ver todas</Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
