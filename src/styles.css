@@ -102,29 +102,6 @@
 }
 
 @layer components {
-  .ckl-logo {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: center;
-    line-height: 1;
-    gap: 2px;
-  }
-  .ckl-logo-mark {
-    background: var(--color-primary);
-    color: #FFFFFF;
-    font-weight: 700;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 18px;
-    line-height: 1;
-    letter-spacing: 0.5px;
-  }
-  .ckl-logo-text {
-    color: #6B7280;
-    font-size: 11px;
-    letter-spacing: 1px;
-    text-transform: lowercase;
-  }
   .ckl-card {
     background: var(--color-card);
     border: 1px solid var(--color-border);

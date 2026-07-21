@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { KEYS, lsGet, lsSet, uid, type Sociedad } from "@/lib/store";
+import cklassLogo from "@/cklass-logo.png";
+import imagenInicio from "@/imagen-inicio.png";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -41,20 +43,12 @@ function LoginPage() {
   return (
     <div className="flex min-h-screen" style={{ background: "#F2F2F2" }}>
       {/* LEFT */}
-      <div
-        className="relative hidden flex-1 overflow-hidden lg:flex"
-        style={{
-          background:
-            "#F2F2F2 repeating-linear-gradient(0deg, transparent 0 39px, #DDDDDD 39px 40px), repeating-linear-gradient(90deg, transparent 0 39px, #DDDDDD 39px 40px)",
-          backgroundBlendMode: "normal",
-        }}
-      >
+      <div className="relative hidden flex-1 overflow-hidden lg:flex" style={{ background: "#F2F2F2" }}>
+        <img src={imagenInicio} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        <div className="absolute inset-0 bg-white/70" />
         <div className="relative z-10 flex w-full flex-col justify-between p-12">
           <div>
-            <span className="ckl-logo">
-              <span className="ckl-logo-mark" style={{ fontSize: 22, padding: "8px 12px" }}>C</span>
-              <span className="ckl-logo-text">cklass</span>
-            </span>
+            <img src={cklassLogo} alt="Cklass" className="h-10 w-auto" />
           </div>
           <div className="max-w-lg">
             <h1 className="text-4xl font-bold leading-tight" style={{ color: "#111111" }}>
@@ -89,10 +83,7 @@ function LoginPage() {
       <div className="flex w-full flex-col items-center justify-center px-6 py-10 lg:w-[480px]" style={{ background: "#F2F2F2" }}>
         <div className="w-full max-w-md rounded-lg bg-white p-9" style={{ border: "1px solid #DDDDDD" }}>
           <div className="mb-6 flex justify-center">
-            <span className="ckl-logo">
-              <span className="ckl-logo-mark" style={{ fontSize: 26, padding: "10px 14px" }}>C</span>
-              <span className="ckl-logo-text">cklass</span>
-            </span>
+            <img src={cklassLogo} alt="Cklass" className="h-12 w-auto" />
           </div>
           {mode === "login" ? (
             <>
@@ -138,7 +129,6 @@ function LoginPage() {
                 <div className="flex-1 border-t" /> o <div className="flex-1 border-t" />
               </div>
               <div className="space-y-2">
-                <button className="ckl-btn-outline w-full justify-center">Crear nueva cuenta</button>
                 <button onClick={() => setMode("prealta")} className="ckl-btn-ghost w-full justify-center">Pre-Alta</button>
               </div>
               <div className="mt-6 rounded-md border bg-muted px-3 py-2 text-[11px] text-muted-foreground">

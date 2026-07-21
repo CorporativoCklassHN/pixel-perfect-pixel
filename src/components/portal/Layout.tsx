@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { KEYS, lsGet, type Solicitud } from "@/lib/store";
+import cklassLogo from "@/cklass-logo.png";
 
 type Item = { to: string; label: string; icon: React.ComponentType<{ size?: number }>; perm?: string; section: string; badge?: number };
 
@@ -48,13 +49,10 @@ export function PortalLayout() {
   const Sidebar = (
     <aside className="flex h-full w-[220px] shrink-0 flex-col border-r" style={{ background: "var(--color-sidebar)", borderColor: "var(--color-sidebar-border)" }}>
       <div className="flex items-center gap-3 p-4">
-        <span className="ckl-logo">
-          <span className="ckl-logo-mark">C</span>
-          <span className="ckl-logo-text">cklass</span>
-        </span>
+        <img src={cklassLogo} alt="Cklass" className="h-8 w-auto" />
         <div>
           <div className="text-sm font-semibold">Portal Viáticos</div>
-          <div className="text-[11px] text-muted-foreground">Grupo Cklass</div>
+          <div className="text-[11px] text-muted-foreground">CKLASS</div>
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto px-2 py-2">
