@@ -22,7 +22,7 @@ function LoginPage() {
   const { login, user } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState<"login" | "prealta">("login");
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [pass, setPass] = useState("");
   const [showPass, setShowPass] = useState(false);
 
@@ -32,7 +32,7 @@ function LoginPage() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (login(email, pass)) {
+    if (login(identifier, pass)) {
       toast.success(`Bienvenido`);
       navigate({ to: "/dashboard" });
     } else {
@@ -89,17 +89,17 @@ function LoginPage() {
             <>
               <h2 className="text-center text-xl font-semibold">Inicia sesión en tu cuenta</h2>
               <p className="mt-1 text-center text-sm" style={{ color: "#444444" }}>
-                Ingresa con tu correo corporativo.
+                Ingresa con tu RFC o usuario.
               </p>
               <form className="mt-6 space-y-4" onSubmit={handleLogin}>
                 <div>
-                  <label className="ckl-label">Correo Corporativo</label>
+                  <label className="ckl-label">RFC / Usuario</label>
                   <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    type="text"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
                     required
-                    placeholder="usuario@cklass.com"
+                    placeholder="RFC / Usuario"
                     className="ckl-input"
                     style={{ borderColor: "#E30613", borderWidth: 1.5 }}
                   />
@@ -131,8 +131,12 @@ function LoginPage() {
               <div className="space-y-2">
                 <button onClick={() => setMode("prealta")} className="ckl-btn-ghost w-full justify-center">Pre-Alta</button>
               </div>
-              <div className="mt-6 rounded-md border bg-muted px-3 py-2 text-[11px] text-muted-foreground">
-                <b>Demo:</b> admin@cklass.com / Admin123! · usuario@cklass.com / User123! · jefe@cklass.com / Jefe123! · finanzas@cklass.com / Fin123!
+              <div className="mt-6 space-y-1 rounded-md border bg-muted px-3 py-2 text-[11px] text-muted-foreground">
+                <div className="mb-1 font-semibold text-foreground">Demo (correo o RFC, misma contraseña):</div>
+                <div>Admin: admin@cklass.com · PEAL800101AB1 · Admin123!</div>
+                <div>Usuario: usuario@cklass.com · TOMM900312EF3 · User123!</div>
+                <div>Jefe: jefe@cklass.com · ALAJ750505CD2 · Jefe123!</div>
+                <div>Finanzas: finanzas@cklass.com · VEGAL850620GH4 · Fin123!</div>
               </div>
             </>
           ) : (

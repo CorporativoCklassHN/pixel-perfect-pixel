@@ -4,7 +4,7 @@ import { KEYS, lsGet, lsSet, initSeed, type Role, type User } from "./store";
 type AuthCtx = {
   user: User | null;
   role: Role | null;
-  login: (email: string, password: string) => boolean;
+  login: (identifier: string, password: string) => boolean;
   logout: () => void;
   refresh: () => void;
   hasPerm: (perm: string) => boolean;
@@ -39,10 +39,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = (email: string, password: string): boolean => {
+  const login = (identifier: string, password: string): boolean => {
     const users = lsGet<User[]>(KEYS.users, []);
+    const id = identifier.trim().toLowerCase();
     const u = users.find(
-      (x) => x.correo.toLowerCase() === email.toLowerCase() && x.password === password && x.activo,
+      (x) =>
+        (x.correo.toLowerCase() === id || x.rfc.toLowerCase() === id) &&
+        x.password === password &&
+        x.activo,
     );
     if (!u) return false;
     lsSet(KEYS.user, u);
