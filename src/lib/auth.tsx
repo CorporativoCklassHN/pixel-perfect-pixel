@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { KEYS, lsGet, lsSet, initSeed, type Role, type User } from "./store";
+import { KEYS, lsGet, lsSet, initSeed, findUserByIdentifier, type Role, type User } from "./store";
 
 type AuthCtx = {
   user: User | null;
@@ -40,15 +40,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = (identifier: string, password: string): boolean => {
-    const users = lsGet<User[]>(KEYS.users, []);
-    const id = identifier.trim().toLowerCase();
-    const u = users.find(
-      (x) =>
-        (x.correo.toLowerCase() === id || x.rfc.toLowerCase() === id) &&
-        x.password === password &&
-        x.activo,
-    );
-    if (!u) return false;
+    const u = findUserByIdentifier(identifier);
+    if (!u || u.password !== password || !u.activo) return false;
     lsSet(KEYS.user, u);
     refresh();
     return true;

@@ -2,7 +2,15 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Clock, CheckCircle2, AlertTriangle, ClockArrowDown, FileText, Download } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
 import { useAuth } from "@/lib/auth";
-import { KEYS, lsGet, fmtMoney, type Solicitud, type Sociedad, type User } from "@/lib/store";
+import {
+  KEYS,
+  lsGet,
+  fmtMoney,
+  filterSolicitudesByOwnership,
+  type Solicitud,
+  type Sociedad,
+  type User,
+} from "@/lib/store";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_portal/dashboard")({
@@ -26,11 +34,15 @@ function Kpi({ icon: Icon, label, value, color, bg, hint }: any) {
 }
 
 function Dashboard() {
-  const { user } = useAuth();
-  const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
+  const { user, role } = useAuth();
+  const allSolicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
   const sociedades = lsGet<Sociedad[]>(KEYS.sociedades, []);
   const users = lsGet<User[]>(KEYS.users, []);
   const mySoc = sociedades.find((s) => s.nombre === user?.empresa);
+
+  // Usuario: solo sus propias solicitudes. Jefe inmediato: solo las de su equipo.
+  // Administrador/Finanzas/Compras corporativas (y roles con "ver todo"): todas.
+  const solicitudes = filterSolicitudesByOwnership(user, role, allSolicitudes, users);
 
   const now = new Date();
   const inMonth = (d: string) => {

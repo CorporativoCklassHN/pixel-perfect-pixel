@@ -3,8 +3,16 @@ import { useMemo, useState } from "react";
 import { Search, FileSpreadsheet, Mail } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
-import { useLocalStorage } from "@/lib/auth";
-import { KEYS, fmtMoney, type Solicitud, type Sociedad, type User } from "@/lib/store";
+import { useAuth, useLocalStorage } from "@/lib/auth";
+import {
+  KEYS,
+  fmtMoney,
+  filterSolicitudesByDateCutoff,
+  filterSolicitudesByOwnership,
+  type Solicitud,
+  type Sociedad,
+  type User,
+} from "@/lib/store";
 import { StatusBadge } from "./_portal.dashboard";
 
 export const Route = createFileRoute("/_portal/reportes")({
@@ -13,6 +21,7 @@ export const Route = createFileRoute("/_portal/reportes")({
 });
 
 function Reportes() {
+  const { user, role, hasPerm } = useAuth();
   const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
   const [users] = useLocalStorage<User[]>(KEYS.users, []);
   const [sociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
@@ -21,12 +30,21 @@ function Reportes() {
   const [soc, setSoc] = useState("Todas");
   const [acreedor, setAcreedor] = useState("");
   const [venc, setVenc] = useState("Todos");
-  const [results, setResults] = useState<Solicitud[]>(solicitudes);
+  const [searched, setSearched] = useState<Solicitud[] | null>(null);
+
+  // Solicitudes visibles según el rol: tope de fecha (4 o 2 meses) + alcance (todo/equipo/propio).
+  const visibleSolicitudes = filterSolicitudesByOwnership(
+    user,
+    role,
+    filterSolicitudesByDateCutoff(solicitudes, role?.nombre),
+    users,
+  );
+  const results = searched ?? visibleSolicitudes;
 
   const userName = (id: string) => users.find((u) => u.id === id)?.nombre ?? "—";
 
   const search = () => {
-    const r = solicitudes.filter((s) => {
+    const r = visibleSolicitudes.filter((s) => {
       const d = new Date(s.created_at);
       if (fi && d < new Date(fi)) return false;
       if (ff && d > new Date(ff)) return false;
@@ -40,7 +58,7 @@ function Reportes() {
       if (venc === "A tiempo" && days > 7) return false;
       return true;
     });
-    setResults(r);
+    setSearched(r);
     toast.success(`${r.length} resultado(s).`);
   };
 
@@ -60,6 +78,10 @@ function Reportes() {
     const days = (Date.now() - new Date(s.created_at).getTime()) / 86400000;
     return { ...s, vencimiento: days > 7 && s.estatus === "Cerrado" && !s.comprobante_viaje ? "Vencido" : "A tiempo" };
   }), [results]);
+
+  if (!hasPerm("ver_reportes")) {
+    return <div className="ckl-card p-8 text-center text-sm">Sin permiso para acceder.</div>;
+  }
 
   return (
     <div className="space-y-4">

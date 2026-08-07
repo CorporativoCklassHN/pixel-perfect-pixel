@@ -2,7 +2,13 @@
 
 export type Role = {
   id: number;
-  nombre: "usuario" | "jefe_inmediato" | "gestor_vuelos" | "finanzas" | "administrador";
+  nombre:
+    | "usuario"
+    | "jefe_inmediato"
+    | "gestor_vuelos"
+    | "finanzas"
+    | "administrador"
+    | "compras_corporativas";
   permisos: Record<string, boolean>;
 };
 
@@ -69,6 +75,14 @@ export type Autorizacion = {
   nota: string;
 };
 
+export type ResetCode = {
+  id: string;
+  user_id: string;
+  code: string;
+  created_at: string;
+  used: boolean;
+};
+
 export type ComprobanteGasto = {
   id: string;
   solicitud_id: string;
@@ -112,6 +126,7 @@ export const KEYS = {
   sociedades: "ckl_sociedades",
   hoteles: "ckl_hoteles",
   origenes: "ckl_origenes",
+  resetCodes: "ckl_reset_codes",
 } as const;
 
 // ───────── SEED DATA ─────────
@@ -171,6 +186,18 @@ const SEED_ROLES: Role[] = [
       gestionar_usuarios: true, configurar_permisos: true, configurar_montos: true,
     },
   },
+  {
+    // Mismos permisos que finanzas.
+    id: 6, nombre: "compras_corporativas",
+    permisos: {
+      solicitar: true, ver_propio: true, comprobar: false,
+      ver_equipo: false, ver_todo: true,
+      autorizar_lte5000: false, autorizar_gt5000: true,
+      rechazar: true, subir_comprobantes_viaje: false,
+      ver_reportes: true, exportar_reportes: true,
+      gestionar_usuarios: false, configurar_permisos: false, configurar_montos: false,
+    },
+  },
 ];
 
 const SEED_USERS: User[] = [
@@ -179,6 +206,7 @@ const SEED_USERS: User[] = [
   { id: "u3", nombre: "María Torres", correo: "usuario@cklass.com", password: "User123!", rfc: "TOMM900312EF3", rol_id: 1, empresa: "WATA GROUP", jefe_id: "u2", activo: true, initials: "MT" },
   { id: "u4", nombre: "Luis Vega", correo: "finanzas@cklass.com", password: "Fin123!", rfc: "VEGAL850620GH4", rol_id: 4, empresa: "WATA GROUP", jefe_id: "u1", activo: true, initials: "LV" },
   { id: "u5", nombre: "Patricia Luna", correo: "gestor@cklass.com", password: "Gest123!", rfc: "LUMP920718IJ5", rol_id: 3, empresa: "INTERMEDIARIA INTERMEX", jefe_id: "u1", activo: false, initials: "PL" },
+  { id: "u6", nombre: "Diego Ramírez", correo: "compras@cklass.com", password: "Compras123!", rfc: "RADI870415KL7", rol_id: 6, empresa: "WATA GROUP", jefe_id: "u1", activo: true, initials: "DR" },
 ];
 
 const SEED_SOCIEDADES: Sociedad[] = [
@@ -268,6 +296,7 @@ export function initSeed() {
     [KEYS.comprobantesGasto, SEED_COMPROBANTES],
     [KEYS.config, SEED_CONFIG],
     [KEYS.origenes, SEED_ORIGENES],
+    [KEYS.resetCodes, []],
     [KEYS.prealtas, []],
     [KEYS.destinos, []],
     [KEYS.gastos, []],
@@ -298,4 +327,82 @@ export function nextFolio(): string {
 
 export function fmtMoney(n: number): string {
   return "$" + n.toLocaleString("es-MX", { maximumFractionDigits: 0 });
+}
+
+export function findUserByIdentifier(identifier: string): User | undefined {
+  const id = identifier.trim().toLowerCase();
+  const users = lsGet<User[]>(KEYS.users, []);
+  return users.find((u) => u.correo.toLowerCase() === id || u.rfc.toLowerCase() === id);
+}
+
+const RESET_CODE_TTL_MS = 10 * 60 * 1000;
+
+// No hay servicio de correo real conectado: el código se genera y se guarda
+// en localStorage; la UI lo muestra directamente a modo de "correo simulado".
+export function generateResetCode(identifier: string): { user: User; code: string } | null {
+  const user = findUserByIdentifier(identifier);
+  if (!user || !user.activo) return null;
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const codes = lsGet<ResetCode[]>(KEYS.resetCodes, []);
+  codes.push({ id: uid("rc_"), user_id: user.id, code, created_at: new Date().toISOString(), used: false });
+  lsSet(KEYS.resetCodes, codes);
+  return { user, code };
+}
+
+export function resetPasswordWithCode(identifier: string, code: string, newPassword: string): boolean {
+  const user = findUserByIdentifier(identifier);
+  if (!user) return false;
+  const codes = lsGet<ResetCode[]>(KEYS.resetCodes, []);
+  const match = codes.find(
+    (c) =>
+      c.user_id === user.id &&
+      c.code === code.trim() &&
+      !c.used &&
+      Date.now() - new Date(c.created_at).getTime() <= RESET_CODE_TTL_MS,
+  );
+  if (!match) return false;
+  match.used = true;
+  lsSet(KEYS.resetCodes, codes);
+  const users = lsGet<User[]>(KEYS.users, []);
+  const idx = users.findIndex((u) => u.id === user.id);
+  if (idx === -1) return false;
+  users[idx] = { ...users[idx], password: newPassword };
+  lsSet(KEYS.users, users);
+  return true;
+}
+
+// Roles con visibilidad extendida (4 meses) de solicitudes en Estatus/Reportes;
+// el resto de los roles se limita a 2 meses hacia atrás.
+const EXTENDED_DATE_RANGE_ROLES = [
+  "administrador",
+  "finanzas",
+  "compras_corporativas",
+  "jefe_inmediato",
+];
+
+export function visibilityMonthsBack(roleName?: string): number {
+  return roleName && EXTENDED_DATE_RANGE_ROLES.includes(roleName) ? 4 : 2;
+}
+
+export function filterSolicitudesByDateCutoff(solicitudes: Solicitud[], roleName?: string): Solicitud[] {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - visibilityMonthsBack(roleName));
+  return solicitudes.filter((s) => new Date(s.created_at) >= cutoff);
+}
+
+// Alcance por rol: ver_todo ve todo, ver_equipo ve solo a su equipo (jefe_id === user.id),
+// cualquier otro rol ve únicamente sus propias solicitudes.
+export function filterSolicitudesByOwnership(
+  user: User | null,
+  role: Role | null,
+  solicitudes: Solicitud[],
+  users: User[],
+): Solicitud[] {
+  if (!user || !role) return [];
+  if (role.permisos.ver_todo) return solicitudes;
+  if (role.permisos.ver_equipo) {
+    const teamIds = new Set(users.filter((u) => u.jefe_id === user.id).map((u) => u.id));
+    return solicitudes.filter((s) => teamIds.has(s.user_id));
+  }
+  return solicitudes.filter((s) => s.user_id === user.id);
 }

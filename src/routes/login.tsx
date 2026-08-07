@@ -3,7 +3,15 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { KEYS, lsGet, lsSet, uid, type Sociedad } from "@/lib/store";
+import {
+  KEYS,
+  lsGet,
+  lsSet,
+  uid,
+  generateResetCode,
+  resetPasswordWithCode,
+  type Sociedad,
+} from "@/lib/store";
 import cklassLogo from "@/cklass-logo.png";
 import imagenInicio from "@/imagen-inicio.png";
 
@@ -21,7 +29,7 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const { login, user } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"login" | "prealta">("login");
+  const [mode, setMode] = useState<"login" | "prealta" | "recuperar">("login");
   const [identifier, setIdentifier] = useState("");
   const [pass, setPass] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -121,7 +129,14 @@ function LoginPage() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <a href="#" className="text-xs" style={{ color: "#444444" }}>¿Olvidaste la contraseña?</a>
+                  <button
+                    type="button"
+                    onClick={() => setMode("recuperar")}
+                    className="text-xs"
+                    style={{ color: "#444444" }}
+                  >
+                    ¿Olvidaste la contraseña?
+                  </button>
                 </div>
                 <button type="submit" className="ckl-btn-primary w-full justify-center">Iniciar sesión</button>
               </form>
@@ -137,10 +152,13 @@ function LoginPage() {
                 <div>Usuario: usuario@cklass.com · TOMM900312EF3 · User123!</div>
                 <div>Jefe: jefe@cklass.com · ALAJ750505CD2 · Jefe123!</div>
                 <div>Finanzas: finanzas@cklass.com · VEGAL850620GH4 · Fin123!</div>
+                <div>Compras: compras@cklass.com · RADI870415KL7 · Compras123!</div>
               </div>
             </>
-          ) : (
+          ) : mode === "prealta" ? (
             <PreAltaForm onBack={() => setMode("login")} />
+          ) : (
+            <RecuperarForm onBack={() => setMode("login")} />
           )}
         </div>
       </div>
@@ -207,5 +225,127 @@ function PreAltaForm({ onBack }: { onBack: () => void }) {
       </div>
       <button type="submit" className="ckl-btn-primary mt-5 w-full justify-center">Enviar Pre-Alta</button>
     </form>
+  );
+}
+
+function RecuperarForm({ onBack }: { onBack: () => void }) {
+  const [step, setStep] = useState<"solicitar" | "codigo">("solicitar");
+  const [identifier, setIdentifier] = useState("");
+  const [demoCode, setDemoCode] = useState("");
+  const [code, setCode] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+
+  const handleSolicitar = (e: React.FormEvent) => {
+    e.preventDefault();
+    const result = generateResetCode(identifier);
+    if (!result) {
+      toast.error("No encontramos una cuenta activa con ese RFC/usuario.");
+      return;
+    }
+    setDemoCode(result.code);
+    toast.success(`Código enviado a ${result.user.correo}`);
+    setStep("codigo");
+  };
+
+  const handleCambiar = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPass.length < 6) {
+      toast.error("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+    if (newPass !== confirmPass) {
+      toast.error("Las contraseñas no coinciden.");
+      return;
+    }
+    if (resetPasswordWithCode(identifier, code, newPass)) {
+      toast.success("Contraseña actualizada. Ya puedes iniciar sesión.");
+      onBack();
+    } else {
+      toast.error("Código inválido o expirado.");
+    }
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft size={14} /> Regresar
+      </button>
+      <h2 className="text-lg font-semibold">Recuperar contraseña</h2>
+
+      {step === "solicitar" ? (
+        <>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Ingresa tu RFC o usuario y te enviaremos un código de un solo uso para restablecer tu
+            contraseña.
+          </p>
+          <form className="mt-4 space-y-4" onSubmit={handleSolicitar}>
+            <div>
+              <label className="ckl-label">RFC / Usuario</label>
+              <input
+                className="ckl-input"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                required
+                placeholder="RFC / Usuario"
+              />
+            </div>
+            <button type="submit" className="ckl-btn-primary w-full justify-center">
+              Enviar código
+            </button>
+          </form>
+        </>
+      ) : (
+        <>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Ingresa el código de un solo uso y define tu nueva contraseña.
+          </p>
+          <div className="mt-3 rounded-md border bg-muted px-3 py-2 text-[11px] text-muted-foreground">
+            <b>Modo demo:</b> no hay un servicio de correo conectado, así que tu código es{" "}
+            <b>{demoCode}</b> (válido 10 minutos, un solo uso).
+          </div>
+          <form className="mt-4 space-y-4" onSubmit={handleCambiar}>
+            <div>
+              <label className="ckl-label">Código</label>
+              <input
+                className="ckl-input"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+                placeholder="123456"
+                maxLength={6}
+              />
+            </div>
+            <div>
+              <label className="ckl-label">Nueva contraseña</label>
+              <input
+                type="password"
+                className="ckl-input"
+                value={newPass}
+                onChange={(e) => setNewPass(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="ckl-label">Confirmar contraseña</label>
+              <input
+                type="password"
+                className="ckl-input"
+                value={confirmPass}
+                onChange={(e) => setConfirmPass(e.target.value)}
+                required
+              />
+            </div>
+            <button type="submit" className="ckl-btn-primary w-full justify-center">
+              Cambiar contraseña
+            </button>
+          </form>
+        </>
+      )}
+    </div>
   );
 }

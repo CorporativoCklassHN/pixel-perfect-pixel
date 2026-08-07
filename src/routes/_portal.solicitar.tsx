@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Plus, X, CheckCircle2 } from "lucide-react";
+import { Plus, X, CheckCircle2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import {
@@ -48,6 +48,11 @@ function daysBetween(a: string, b: string) {
   return Math.max(0, Math.floor((d2.getTime() - d1.getTime()) / 86400000) + 1);
 }
 
+// Noches de hotel = días del rango - 1 (entrada y salida el mismo día no genera noche).
+function nightsBetween(a: string, b: string) {
+  return Math.max(0, daysBetween(a, b) - 1);
+}
+
 function Solicitar() {
   const { user } = useAuth();
   const nav = useNavigate();
@@ -71,7 +76,9 @@ function Solicitar() {
   const totals = useMemo(() => {
     let foraneo = 0, local = 0, otros = 0, hotel = 0, diasTot = 0;
     for (const d of destinos) {
-      hotel += Number(d.hotel_monto) || 0;
+      const tarifa = Number(d.hotel_monto) || 0;
+      // Si no es monto manual, hotel_monto es la tarifa por noche: se multiplica por las noches del rango.
+      hotel += d.hotel_manual ? tarifa : tarifa * nightsBetween(d.fecha_inicio, d.fecha_fin);
       foraneo += d.foraneo.reduce((a, r) => a + (Number(r.monto) || 0), 0);
       local += d.local.reduce((a, r) => a + (Number(r.monto) || 0), 0);
       otros += d.otros.reduce((a, r) => a + (Number(r.monto) || 0), 0);
@@ -119,8 +126,27 @@ function Solicitar() {
     setShowModal(true);
   };
 
+  const esMartes = new Date().getDay() === 2;
+
   return (
     <div className="mx-auto max-w-6xl space-y-5 pb-24">
+      {!esMartes && (
+        <div
+          className="flex items-center gap-2 rounded-md border px-4 py-3 text-sm"
+          style={{
+            background: "var(--color-warning-soft)",
+            color: "var(--color-warning)",
+            borderColor: "var(--color-warning)",
+          }}
+        >
+          <AlertTriangle size={16} className="shrink-0" />
+          <span>
+            <b>Hoy no es martes.</b> Recuerda que las solicitudes preferentemente se capturan los
+            martes.
+          </span>
+        </div>
+      )}
+
       {/* General */}
       <section className="ckl-card p-5">
         <div className="mb-3 flex items-center justify-between">
@@ -234,6 +260,7 @@ function Tot({ label, v }: { label: string; v: number }) {
 function DestinoBlock({ idx, d, hoteles, onChange, onRemove }: { idx: number; d: Destino; hoteles: Hotel[]; onChange: (p: Partial<Destino>) => void; onRemove?: () => void }) {
   const filteredHotels = hoteles.filter((h) => h.estado === d.estado && h.activo);
   const days = daysBetween(d.fecha_inicio, d.fecha_fin);
+  const nights = nightsBetween(d.fecha_inicio, d.fecha_fin);
   const dayLabels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
   // Active day indexes within Mon-Sun grid (use start day-of-week)
@@ -299,6 +326,11 @@ function DestinoBlock({ idx, d, hoteles, onChange, onRemove }: { idx: number; d:
             <input type="checkbox" checked={d.hotel_manual} onChange={(e) => onChange({ hotel_manual: e.target.checked, hotel_monto: 0 })} />
             Monto manual
           </label>
+          {!d.hotel_manual && d.hotel_monto > 0 && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {nights} noche(s) × {fmtMoney(d.hotel_monto)} = <b>{fmtMoney(nights * d.hotel_monto)}</b>
+            </p>
+          )}
         </div>
       </div>
 
@@ -313,7 +345,10 @@ function RowsSection({ title, medios, rows, onChange }: { title: string; medios:
   return (
     <div className="mt-4">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-semibold">{title}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">{title}</span>
+          <span className="text-[11px] text-muted-foreground">(Poner el monto total del viático)</span>
+        </div>
         <button onClick={() => onChange([...rows, { id: uid("r_"), tipo: medios[0], monto: 0 }])} className="ckl-btn-ghost"><Plus size={12} /> Agregar</button>
       </div>
       {rows.length === 0 && <p className="text-xs text-muted-foreground">Sin entradas.</p>}
@@ -336,7 +371,10 @@ function OtrosSection({ rows, onChange }: { rows: OtroRow[]; onChange: (r: OtroR
   return (
     <div className="mt-4">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-semibold">Otros conceptos</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">Otros conceptos</span>
+          <span className="text-[11px] text-muted-foreground">(Poner el monto total del viático)</span>
+        </div>
         <button onClick={() => onChange([...rows, { id: uid("o_"), concepto: "", monto: 0 }])} className="ckl-btn-ghost"><Plus size={12} /> Agregar</button>
       </div>
       {rows.length === 0 && <p className="text-xs text-muted-foreground">Sin entradas.</p>}

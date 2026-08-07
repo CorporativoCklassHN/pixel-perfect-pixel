@@ -4,7 +4,15 @@ import { Search, MessageSquareWarning, Upload, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useLocalStorage } from "@/lib/auth";
-import { KEYS, fmtMoney, uid, type Solicitud, type User, type Autorizacion } from "@/lib/store";
+import {
+  KEYS,
+  fmtMoney,
+  uid,
+  filterSolicitudesByDateCutoff,
+  type Solicitud,
+  type User,
+  type Autorizacion,
+} from "@/lib/store";
 import { StatusBadge } from "./_portal.dashboard";
 import { Modal } from "./_portal.solicitar";
 
@@ -28,13 +36,14 @@ function Estatus() {
   const [rejectNote, setRejectNote] = useState("");
 
   const filtered = useMemo(() => {
-    return solicitudes.filter((s) => {
+    const dentroDeRango = filterSolicitudesByDateCutoff(solicitudes, role?.nombre);
+    return dentroDeRango.filter((s) => {
       const u = users.find((x) => x.id === s.user_id);
       const matchQ = !q || s.folio.toLowerCase().includes(q.toLowerCase()) || (u?.nombre.toLowerCase().includes(q.toLowerCase()) ?? false);
       const matchE = estado === "Todos" || s.estatus === estado;
       return matchQ && matchE;
     });
-  }, [solicitudes, q, estado, users]);
+  }, [solicitudes, q, estado, users, role]);
 
   const userName = (id: string) => users.find((u) => u.id === id)?.nombre ?? "—";
 

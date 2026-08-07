@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Edit2, Plus, UserCog } from "lucide-react";
 import { toast } from "sonner";
-import { useLocalStorage } from "@/lib/auth";
+import { useAuth, useLocalStorage } from "@/lib/auth";
 import { KEYS, type Role, type User, uid } from "@/lib/store";
 import { Modal } from "./_portal.solicitar";
 
@@ -14,12 +14,16 @@ export const Route = createFileRoute("/_portal/usuarios")({
 const ROLE_COLORS: Record<string, { bg: string; fg: string }> = {
   administrador: { bg: "#FEE9EA", fg: "#E30613" },
   finanzas: { bg: "#DBEAFE", fg: "#1D4ED8" },
+  compras_corporativas: { bg: "#EDE9FE", fg: "#6D28D9" },
   jefe_inmediato: { bg: "#D8F3DC", fg: "#2D6A4F" },
   gestor_vuelos: { bg: "#FEF3C7", fg: "#B45309" },
   usuario: { bg: "#F1F3F5", fg: "#555" },
 };
 
+const ADMIN_LOCK_MSG = "Solo un administrador puede modificar cuentas de administrador.";
+
 function Usuarios() {
+  const { role: myRole } = useAuth();
   const [users, setUsers] = useLocalStorage<User[]>(KEYS.users, []);
   const [roles] = useLocalStorage<Role[]>(KEYS.roles, []);
   const [edit, setEdit] = useState<User | null>(null);
@@ -28,9 +32,25 @@ function Usuarios() {
   const roleName = (id: number) => roles.find((r) => r.id === id)?.nombre ?? "—";
   const jefe = (id: string | null) => users.find((u) => u.id === id)?.nombre ?? "—";
 
-  const toggleActive = (u: User) => setUsers(users.map((x) => x.id === u.id ? { ...x, activo: !x.activo } : x));
+  const soyAdmin = myRole?.nombre === "administrador";
+  const canModify = (u: User) => soyAdmin || roleName(u.rol_id) !== "administrador";
+
+  const toggleActive = (u: User) => {
+    if (!canModify(u)) return toast.error(ADMIN_LOCK_MSG);
+    setUsers(users.map((x) => (x.id === u.id ? { ...x, activo: !x.activo } : x)));
+  };
+
+  const openEdit = (u: User) => {
+    if (!canModify(u)) return toast.error(ADMIN_LOCK_MSG);
+    setCreating(false);
+    setEdit(u);
+  };
 
   const save = (u: User) => {
+    if (roleName(u.rol_id) === "administrador" && !soyAdmin) {
+      toast.error("Solo un administrador puede asignar el rol de administrador.");
+      return;
+    }
     if (creating) {
       setUsers([{ ...u, id: uid("u_") }, ...users]);
       toast.success("Usuario creado.");
@@ -58,6 +78,7 @@ function Usuarios() {
             <tbody>
               {users.map((u) => {
                 const rc = ROLE_COLORS[roleName(u.rol_id)] ?? ROLE_COLORS.usuario;
+                const locked = !canModify(u);
                 return (
                   <tr key={u.id} className="border-t">
                     <td className="p-3">
@@ -71,12 +92,25 @@ function Usuarios() {
                     <td className="p-3 text-xs">{u.empresa}</td>
                     <td className="p-3 text-xs">{jefe(u.jefe_id)}</td>
                     <td className="p-3">
-                      <button onClick={() => toggleActive(u)} className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors" style={{ background: u.activo ? "var(--color-primary)" : "#ccc" }}>
+                      <button
+                        onClick={() => toggleActive(u)}
+                        disabled={locked}
+                        title={locked ? ADMIN_LOCK_MSG : undefined}
+                        className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                        style={{ background: u.activo ? "var(--color-primary)" : "#ccc" }}
+                      >
                         <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform" style={{ transform: u.activo ? "translateX(18px)" : "translateX(2px)" }} />
                       </button>
                     </td>
                     <td className="p-3">
-                      <button onClick={() => { setCreating(false); setEdit(u); }} className="rounded p-1.5 hover:bg-secondary"><Edit2 size={14} /></button>
+                      <button
+                        onClick={() => openEdit(u)}
+                        disabled={locked}
+                        title={locked ? ADMIN_LOCK_MSG : undefined}
+                        className="rounded p-1.5 hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                      >
+                        <Edit2 size={14} />
+                      </button>
                     </td>
                   </tr>
                 );
