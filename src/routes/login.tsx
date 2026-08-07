@@ -50,44 +50,7 @@ function LoginPage() {
 
   return (
     <div className="flex min-h-screen" style={{ background: "#F2F2F2" }}>
-      {/* LEFT */}
-      <div className="relative hidden flex-1 overflow-hidden lg:flex" style={{ background: "#F2F2F2" }}>
-        <img src={imagenInicio} alt="" className="absolute inset-0 h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-white/70" />
-        <div className="relative z-10 flex w-full flex-col justify-between p-12">
-          <div>
-            <img src={cklassLogo} alt="Cklass" className="h-10 w-auto" />
-          </div>
-          <div className="max-w-lg">
-            <h1 className="text-4xl font-bold leading-tight" style={{ color: "#111111" }}>
-              Portal de Viáticos
-            </h1>
-            <p className="mt-3 text-sm" style={{ color: "#333333" }}>
-              Gestión integral de solicitudes y comprobaciones.
-            </p>
-
-            <div className="mt-10 grid grid-cols-2 gap-4">
-              <div className="rounded-lg border bg-white p-5" style={{ borderColor: "#DDDDDD" }}>
-                <div className="text-[11px] uppercase tracking-wider" style={{ color: "#555555" }}>
-                  Solicitudes activas
-                </div>
-                <div className="mt-2 text-3xl font-bold" style={{ color: "#111111" }}>47</div>
-              </div>
-              <div className="rounded-lg border bg-white p-5" style={{ borderColor: "#DDDDDD" }}>
-                <div className="text-[11px] uppercase tracking-wider" style={{ color: "#555555" }}>
-                  Ejercido este mes
-                </div>
-                <div className="mt-2 text-3xl font-bold" style={{ color: "#111111" }}>$284,500</div>
-              </div>
-            </div>
-          </div>
-          <p className="text-xs" style={{ color: "#555555" }}>
-            © {new Date().getFullYear()} Grupo Cklass. Todos los derechos reservados.
-          </p>
-        </div>
-      </div>
-
-      {/* RIGHT */}
+      {/* LEFT: login form */}
       <div className="flex w-full flex-col items-center justify-center px-6 py-10 lg:w-[480px]" style={{ background: "#F2F2F2" }}>
         <div className="w-full max-w-md rounded-lg bg-white p-9" style={{ border: "1px solid #DDDDDD" }}>
           <div className="mb-6 flex justify-center">
@@ -160,6 +123,28 @@ function LoginPage() {
           ) : (
             <RecuperarForm onBack={() => setMode("login")} />
           )}
+        </div>
+      </div>
+
+      {/* RIGHT: branding */}
+      <div className="relative hidden flex-1 overflow-hidden lg:flex" style={{ background: "#F2F2F2" }}>
+        <img src={imagenInicio} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        <div className="absolute inset-0 bg-white/70" />
+        <div className="relative z-10 flex w-full flex-col justify-between p-12">
+          <div>
+            <img src={cklassLogo} alt="Cklass" className="h-10 w-auto" />
+          </div>
+          <div className="max-w-lg">
+            <h1 className="text-4xl font-bold leading-tight" style={{ color: "#111111" }}>
+              Portal de Viáticos
+            </h1>
+            <p className="mt-3 text-sm" style={{ color: "#333333" }}>
+              Gestión integral de solicitudes y comprobaciones.
+            </p>
+          </div>
+          <p className="text-xs" style={{ color: "#555555" }}>
+            © {new Date().getFullYear()} Grupo Cklass. Todos los derechos reservados.
+          </p>
         </div>
       </div>
     </div>
