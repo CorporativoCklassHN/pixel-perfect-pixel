@@ -58,7 +58,7 @@ function Configuracion() {
       <div className="ckl-card p-5">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold">Sociedades</h3>
-          <button onClick={() => setEdit({ id: 0, nombre: "", rfc: "", regimen: "601 - Gral. Personas Morales", cp: "", UsoCFDI: "Gastos en General", sociedad_sap: "" })} className="ckl-btn-outline"><Plus size={14} /> Agregar</button>
+          <button onClick={() => setEdit({ id: 0, nombre: "", rfc: "", regimen: "601 - Gral. Personas Morales", cp: "", UsoCFDI: "G03 - Gastos en General", sociedad_sap: "" })} className="ckl-btn-outline"><Plus size={14} /> Agregar</button>
         </div>
         <div className="mt-3 divide-y">
           {sociedades.map((s) => (
