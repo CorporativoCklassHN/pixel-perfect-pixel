@@ -62,6 +62,7 @@ function Solicitar() {
 
   const [folio] = useState(nextFolio());
   const today = new Date().toLocaleDateString("es-MX");
+  const todayIso = new Date().toISOString().slice(0, 10);
   const [origen, setOrigen] = useState(origenes[0] ?? "");
   const [tipo, setTipo] = useState(TIPOS[0]);
   const [personas, setPersonas] = useState(1);
@@ -93,6 +94,15 @@ function Solicitar() {
 
   const guardar = () => {
     if (!motivo.trim()) return toast.error("Captura el motivo del viaje.");
+    for (let i = 0; i < destinos.length; i++) {
+      const d = destinos[i];
+      if (!d.fecha_inicio || !d.fecha_fin) return toast.error(`Captura las fechas del destino ${i + 1}.`);
+      if (d.fecha_inicio < todayIso) return toast.error(`La fecha de inicio del destino ${i + 1} no puede ser anterior a hoy.`);
+      if (d.fecha_fin < d.fecha_inicio) return toast.error(`La fecha fin del destino ${i + 1} no puede ser anterior a su fecha de inicio.`);
+      if (i > 0 && d.fecha_inicio < destinos[i - 1].fecha_fin) {
+        return toast.error(`Las fechas del destino ${i + 1} se empalman con el destino ${i}.`);
+      }
+    }
     const resumen = destinos.map((d) => d.estado).join(" - ");
     const sol: Solicitud = {
       id: uid("s_"), folio, user_id: user!.id, fecha: today,
@@ -190,6 +200,7 @@ function Solicitar() {
           {destinos.map((d, idx) => (
             <DestinoBlock
               key={d.id} idx={idx} d={d} hoteles={hoteles}
+              minStart={idx === 0 ? todayIso : destinos[idx - 1].fecha_fin || todayIso}
               onChange={(p) => updateD(d.id, p)}
               onRemove={destinos.length > 1 ? () => setDestinos((arr) => arr.filter((x) => x.id !== d.id)) : undefined}
             />
@@ -257,7 +268,21 @@ function Tot({ label, v }: { label: string; v: number }) {
   );
 }
 
-function DestinoBlock({ idx, d, hoteles, onChange, onRemove }: { idx: number; d: Destino; hoteles: Hotel[]; onChange: (p: Partial<Destino>) => void; onRemove?: () => void }) {
+function DestinoBlock({
+  idx,
+  d,
+  hoteles,
+  minStart,
+  onChange,
+  onRemove,
+}: {
+  idx: number;
+  d: Destino;
+  hoteles: Hotel[];
+  minStart: string;
+  onChange: (p: Partial<Destino>) => void;
+  onRemove?: () => void;
+}) {
   const filteredHotels = hoteles.filter((h) => h.estado === d.estado && h.activo);
   const days = daysBetween(d.fecha_inicio, d.fecha_fin);
   const nights = nightsBetween(d.fecha_inicio, d.fecha_fin);
@@ -278,8 +303,40 @@ function DestinoBlock({ idx, d, hoteles, onChange, onRemove }: { idx: number; d:
         <select className="ckl-input max-w-[180px]" value={d.estado} onChange={(e) => onChange({ estado: e.target.value, hotel_monto: 0 })}>
           {ESTADOS.map((s) => <option key={s}>{s}</option>)}
         </select>
-        <input type="date" className="ckl-input max-w-[150px]" value={d.fecha_inicio} onChange={(e) => onChange({ fecha_inicio: e.target.value })} />
-        <input type="date" className="ckl-input max-w-[150px]" value={d.fecha_fin} onChange={(e) => onChange({ fecha_fin: e.target.value })} />
+        <input
+          type="date"
+          className="ckl-input max-w-[150px]"
+          value={d.fecha_inicio}
+          min={minStart}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v && v < minStart) {
+              toast.error(
+                idx === 0
+                  ? "La fecha de inicio no puede ser anterior a hoy."
+                  : `La fecha de inicio no puede ser anterior a la fecha fin del destino ${idx}.`,
+              );
+              return;
+            }
+            const patch: Partial<Destino> = { fecha_inicio: v };
+            if (d.fecha_fin && v && d.fecha_fin < v) patch.fecha_fin = "";
+            onChange(patch);
+          }}
+        />
+        <input
+          type="date"
+          className="ckl-input max-w-[150px]"
+          value={d.fecha_fin}
+          min={d.fecha_inicio || minStart}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v && d.fecha_inicio && v < d.fecha_inicio) {
+              toast.error("La fecha fin no puede ser anterior a la fecha de inicio.");
+              return;
+            }
+            onChange({ fecha_fin: v });
+          }}
+        />
         <span className="text-xs text-muted-foreground">{days} día(s)</span>
         {onRemove && (
           <button onClick={onRemove} className="ml-auto rounded p-1.5 text-muted-foreground hover:text-foreground"><X size={16} /></button>

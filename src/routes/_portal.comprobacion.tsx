@@ -10,7 +10,20 @@ export const Route = createFileRoute("/_portal/comprobacion")({
   component: Comprobacion,
 });
 
-type Factura = { id: string; solicitud_id: string; tipo: "XML" | "PDF"; fecha: string; uuid: string; archivo: string; total: number; status: "Verificado" | "Error" };
+type Factura = {
+  id: string;
+  solicitud_id: string;
+  tipo: "XML" | "PDF";
+  fecha: string;
+  uuid: string;
+  archivo: string;
+  total: number;
+  status: "Verificado" | "Error";
+  // Renglón de la tabla de comprobación al que se aplicó este monto, y cuánto se le aplicó
+  // (puede ser menor a `total` si el renglón se saturó). Permite revertir exacto al eliminar.
+  concepto_id: string | null;
+  monto_aplicado: number;
+};
 
 function Comprobacion() {
   const { user } = useAuth();
@@ -33,6 +46,11 @@ function Comprobacion() {
     inp.onchange = async () => {
       const file = inp.files?.[0];
       if (!file || !sel) return;
+      if (fs.some((f) => f.archivo === file.name)) {
+        addLog(`✖ Archivo duplicado: ${file.name}`);
+        toast.error(`El archivo "${file.name}" ya fue cargado para esta solicitud.`);
+        return;
+      }
       let total = Math.floor(Math.random() * 800) + 200;
       let status: "Verificado" | "Error" = "Verificado";
       let uuidv = uid("UUID-").toUpperCase();
@@ -53,28 +71,58 @@ function Comprobacion() {
       } else {
         addLog(`✔ PDF cargado: ${file.name}`);
       }
-      const factura: Factura = {
-        id: uid("f_"), solicitud_id: sid, tipo: kind,
-        fecha: new Date().toLocaleDateString("es-MX"),
-        uuid: uuidv, archivo: file.name, total, status,
-      };
-      setFacturas([factura, ...facturas]);
+      let conceptoId: string | null = null;
+      let montoAplicado = 0;
       if (status === "Verificado") {
         // Increase a hotel/other to simulate
         const pendiente = rows.find((r) => r.status_renglon !== "comprobado");
         if (pendiente) {
-          setComprobantes(comprobantes.map((c) => c.id === pendiente.id ? { ...c, monto_comprobado: Math.min(c.monto_solicitado, c.monto_comprobado + total), status_renglon: (c.monto_comprobado + total) >= c.monto_solicitado ? "comprobado" : "parcialmente_comprobado" } : c));
+          conceptoId = pendiente.id;
+          montoAplicado = Math.min(total, pendiente.monto_solicitado - pendiente.monto_comprobado);
+          setComprobantes(
+            comprobantes.map((c) =>
+              c.id === pendiente.id
+                ? {
+                    ...c,
+                    monto_comprobado: c.monto_comprobado + montoAplicado,
+                    status_renglon:
+                      c.monto_comprobado + montoAplicado >= c.monto_solicitado
+                        ? "comprobado"
+                        : "parcialmente_comprobado",
+                  }
+                : c,
+            ),
+          );
         }
         toast.success("Comprobante cargado y verificado.");
       } else {
         toast.error("Error de validación. Revisa el log.");
       }
+      const factura: Factura = {
+        id: uid("f_"), solicitud_id: sid, tipo: kind,
+        fecha: new Date().toLocaleDateString("es-MX"),
+        uuid: uuidv, archivo: file.name, total, status,
+        concepto_id: conceptoId, monto_aplicado: montoAplicado,
+      };
+      setFacturas([factura, ...facturas]);
     };
     inp.click();
   };
 
   const removeFactura = (id: string) => {
-    setFacturas(facturas.filter((f) => f.id !== id));
+    const f = facturas.find((x) => x.id === id);
+    setFacturas(facturas.filter((x) => x.id !== id));
+    if (f?.concepto_id && f.monto_aplicado > 0) {
+      setComprobantes(comprobantes.map((c) => {
+        if (c.id !== f.concepto_id) return c;
+        const nuevo = Math.max(0, c.monto_comprobado - f.monto_aplicado);
+        return {
+          ...c,
+          monto_comprobado: nuevo,
+          status_renglon: nuevo <= 0 ? "pendiente" : nuevo >= c.monto_solicitado ? "comprobado" : "parcialmente_comprobado",
+        };
+      }));
+    }
     toast.success("Factura eliminada.");
   };
 
@@ -82,6 +130,8 @@ function Comprobacion() {
 
   const totSol = rows.reduce((a, r) => a + r.monto_solicitado, 0);
   const totComp = rows.reduce((a, r) => a + r.monto_comprobado, 0);
+  // Estatus global: comprobado solo cuando el total comprobado iguala al total solicitado.
+  const comprobado = totSol > 0 && totComp === totSol;
 
   return (
     <div className="space-y-5">
@@ -96,7 +146,15 @@ function Comprobacion() {
       <div className="grid gap-5 lg:grid-cols-2">
         {/* Tabla */}
         <div className="ckl-card overflow-hidden">
-          <div className="border-b p-4 text-sm font-semibold">Tabla de comprobación</div>
+          <div className="flex items-center justify-between border-b p-4">
+            <span className="text-sm font-semibold">Tabla de comprobación</span>
+            <span
+              className="ckl-badge"
+              style={{ background: comprobado ? "#D8F3DC" : "#FEF3C7", color: comprobado ? "#2D6A4F" : "#B45309" }}
+            >
+              {comprobado ? "Comprobado" : "Pendiente de comprobar"}
+            </span>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-secondary text-left text-xs text-muted-foreground">
