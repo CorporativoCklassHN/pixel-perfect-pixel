@@ -288,12 +288,16 @@ function DestinoBlock({
   const nights = nightsBetween(d.fecha_inicio, d.fecha_fin);
   const dayLabels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
-  // Active day indexes within Mon-Sun grid (use start day-of-week)
-  const activeIdx = new Set<number>();
+  // Solo los días dentro del rango seleccionado (no la semana completa).
+  // Se construyen en UTC para que no se recorran un día al leer el componente
+  // local (p. ej. en zonas horarias detrás de UTC como México).
+  const selectedDays: Date[] = [];
   if (d.fecha_inicio && days > 0) {
-    const start = new Date(d.fecha_inicio);
-    let dow = (start.getDay() + 6) % 7; // Mon=0
-    for (let i = 0; i < days && dow < 7; i++, dow++) activeIdx.add(dow);
+    const [y, m, dia] = d.fecha_inicio.split("-").map(Number);
+    const startUtc = Date.UTC(y, m - 1, dia);
+    for (let i = 0; i < days; i++) {
+      selectedDays.push(new Date(startUtc + i * 86400000));
+    }
   }
 
   return (
@@ -343,27 +347,21 @@ function DestinoBlock({
         )}
       </div>
 
-      {/* Week grid */}
-      <div className="grid grid-cols-7 gap-1.5">
-        {dayLabels.map((lbl, i) => {
-          const active = activeIdx.has(i);
-          return (
-            <div key={i} className="rounded-md border bg-white p-2 text-center" style={{ opacity: active ? 1 : 0.5, background: active ? "white" : "#F1F3F5" }}>
-              <div className="text-[10px] font-semibold text-muted-foreground">{lbl}</div>
-              <div className="mt-1.5 flex flex-col gap-1">
-                {["Hotel", "Transporte", "Otros"].map((t) => {
-                  const has = active && ((t === "Hotel" && d.hotel_monto) || (t === "Transporte" && (d.foraneo.length || d.local.length)) || (t === "Otros" && d.otros.length));
-                  return (
-                    <div key={t} className="rounded px-1 py-0.5 text-[10px] font-bold" style={{ background: has ? "#FEE9EA" : "transparent", color: has ? "#B5040F" : "#333333" }}>
-                      {t}
-                    </div>
-                  );
-                })}
+      {/* Días seleccionados */}
+      {selectedDays.length > 0 && (
+        <div className="grid grid-cols-7 gap-1.5">
+          {selectedDays.map((dt, i) => (
+            <div key={i} className="rounded-md border bg-white p-2 text-center">
+              <div className="text-[10px] font-semibold uppercase text-muted-foreground">
+                {dayLabels[(dt.getUTCDay() + 6) % 7]}
+              </div>
+              <div className="mt-0.5 text-sm font-bold" style={{ color: "var(--color-primary)" }}>
+                {dt.getUTCDate()}
               </div>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* Hotel */}
       <div className="mt-4 grid gap-3 md:grid-cols-2">
