@@ -107,7 +107,7 @@ function LoginPage() {
                 <div className="flex-1 border-t" /> o <div className="flex-1 border-t" />
               </div>
               <div className="space-y-2">
-                <button onClick={() => setMode("prealta")} className="ckl-btn-ghost w-full justify-center">Pre-Alta</button>
+                <button onClick={() => setMode("prealta")} className="ckl-btn-ghost w-full justify-center">Pre-Registro</button>
               </div>
               <div className="mt-6 space-y-1 rounded-md border bg-muted px-3 py-2 text-[11px] text-muted-foreground">
                 <div className="mb-1 font-semibold text-foreground">Demo (correo o RFC, misma contraseña):</div>
@@ -172,7 +172,7 @@ function PreAltaForm({ onBack }: { onBack: () => void }) {
     const list = lsGet<unknown[]>(KEYS.prealtas, []);
     list.push({ id: uid("pa_"), ...f, status: "pendiente", created_at: new Date().toISOString() });
     lsSet(KEYS.prealtas, list);
-    toast.success("Pre-Alta registrada.");
+    toast.success("Pre-Registro enviado.");
     onBack();
   };
 
@@ -181,7 +181,7 @@ function PreAltaForm({ onBack }: { onBack: () => void }) {
       <button type="button" onClick={onBack} className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft size={14} /> Regresar
       </button>
-      <h2 className="text-lg font-semibold">Pre-Alta de cuenta</h2>
+      <h2 className="text-lg font-semibold">Pre-Registro de cuenta</h2>
       <p className="mt-1 text-xs text-muted-foreground">Tu solicitud quedará pendiente de aprobación por el administrador.</p>
       <div className="mt-4 grid grid-cols-2 gap-3">
         {([
@@ -208,7 +208,7 @@ function PreAltaForm({ onBack }: { onBack: () => void }) {
           <input type="password" className="ckl-input" value={f.confirm} onChange={(e) => set("confirm", e.target.value)} />
         </div>
       </div>
-      <button type="submit" className="ckl-btn-primary mt-5 w-full justify-center">Enviar Pre-Alta</button>
+      <button type="submit" className="ckl-btn-primary mt-5 w-full justify-center">Enviar Pre-Registro</button>
     </form>
   );
 }
