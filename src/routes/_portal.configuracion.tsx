@@ -3,8 +3,23 @@ import { useState } from "react";
 import { Edit2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useLocalStorage } from "@/lib/auth";
-import { KEYS, type Sociedad } from "@/lib/store";
+import { KEYS, type Sociedad, type Role } from "@/lib/store";
 import { Modal } from "./_portal.solicitar";
+
+// Normaliza el nombre capturado a un identificador consistente con el resto
+// de los roles (snake_case, sin acentos) — se usa como comparación en varias
+// partes de la app (p. ej. permisos de administrador).
+const COMBINING_MARKS = new RegExp("[\\u0300-\\u036f]", "g");
+
+function slugifyRole(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(COMBINING_MARKS, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
 
 export const Route = createFileRoute("/_portal/configuracion")({
   head: () => ({ meta: [{ title: "Configuración — CKL" }] }),
@@ -17,8 +32,10 @@ function Configuracion() {
   const { hasPerm } = useAuth();
   const [config, setConfig] = useLocalStorage<Config>(KEYS.config, { monto_comida_diario: 450, umbral_finanzas: 5000, dia_deposito: "Viernes", email_compras: "compras@cklass.com" });
   const [sociedades, setSociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
+  const [roles, setRoles] = useLocalStorage<Role[]>(KEYS.roles, []);
   const [draft, setDraft] = useState<Config>(config);
   const [edit, setEdit] = useState<Sociedad | null>(null);
+  const [editRole, setEditRole] = useState<{ nombre: string; copyFrom: number } | null>(null);
 
   if (!hasPerm("configurar_montos")) {
     return <div className="ckl-card p-8 text-center text-sm">Sin permiso para acceder.</div>;
@@ -35,6 +52,18 @@ function Configuracion() {
     }
     toast.success("Sociedad guardada.");
     setEdit(null);
+  };
+
+  const saveRole = () => {
+    if (!editRole) return;
+    const nombre = slugifyRole(editRole.nombre);
+    if (!nombre) return toast.error("Captura un nombre para el rol.");
+    if (roles.some((r) => r.nombre === nombre)) return toast.error("Ya existe un rol con ese nombre.");
+    const template = roles.find((r) => r.id === editRole.copyFrom);
+    const newId = Math.max(0, ...roles.map((r) => r.id)) + 1;
+    setRoles([...roles, { id: newId, nombre, permisos: { ...(template?.permisos ?? {}) } }]);
+    toast.success(`Rol "${nombre}" creado. Ajusta sus permisos en Permisos.`);
+    setEditRole(null);
   };
 
   return (
@@ -73,6 +102,29 @@ function Configuracion() {
         </div>
       </div>
 
+      <div className="ckl-card p-5 lg:col-span-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold">Roles</h3>
+          <button
+            onClick={() => setEditRole({ nombre: "", copyFrom: roles[0]?.id ?? 0 })}
+            className="ckl-btn-outline"
+          >
+            <Plus size={14} /> Agregar rol
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Crea un rol copiando los permisos de uno existente; después ajusta el detalle en la sección
+          "Permisos".
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {roles.map((r) => (
+            <span key={r.id} className="ckl-badge" style={{ background: "#F1F3F5", color: "#333" }}>
+              {r.nombre}
+            </span>
+          ))}
+        </div>
+      </div>
+
       {edit && (
         <Modal onClose={() => setEdit(null)}>
           <h3 className="mb-3 text-lg font-semibold">{edit.id ? "Editar" : "Nueva"} sociedad</h3>
@@ -87,6 +139,37 @@ function Configuracion() {
           <div className="mt-5 flex justify-end gap-2">
             <button onClick={() => setEdit(null)} className="ckl-btn-ghost">Cancelar</button>
             <button onClick={() => saveSoc(edit)} className="ckl-btn-primary">Guardar</button>
+          </div>
+        </Modal>
+      )}
+
+      {editRole && (
+        <Modal onClose={() => setEditRole(null)}>
+          <h3 className="mb-3 text-lg font-semibold">Nuevo rol</h3>
+          <div className="space-y-3">
+            <div>
+              <label className="ckl-label">Nombre del rol</label>
+              <input
+                className="ckl-input"
+                value={editRole.nombre}
+                onChange={(e) => setEditRole({ ...editRole, nombre: e.target.value })}
+                placeholder="Ej. Compras Corporativas"
+              />
+            </div>
+            <div>
+              <label className="ckl-label">Copiar permisos de</label>
+              <select
+                className="ckl-input"
+                value={editRole.copyFrom}
+                onChange={(e) => setEditRole({ ...editRole, copyFrom: +e.target.value })}
+              >
+                {roles.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <button onClick={() => setEditRole(null)} className="ckl-btn-ghost">Cancelar</button>
+            <button onClick={saveRole} className="ckl-btn-primary">Guardar</button>
           </div>
         </Modal>
       )}

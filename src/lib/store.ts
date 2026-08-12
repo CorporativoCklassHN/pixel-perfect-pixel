@@ -2,13 +2,9 @@
 
 export type Role = {
   id: number;
-  nombre:
-    | "usuario"
-    | "jefe_inmediato"
-    | "gestor_vuelos"
-    | "finanzas"
-    | "administrador"
-    | "compras_corporativas";
+  // string (no unión literal): los administradores pueden dar de alta roles
+  // nuevos desde Configuración, así que el set de nombres válidos es dinámico.
+  nombre: string;
   permisos: Record<string, boolean>;
 };
 
@@ -308,6 +304,34 @@ export function initSeed() {
     if (window.localStorage.getItem(k) === null) {
       window.localStorage.setItem(k, JSON.stringify(v));
     }
+  }
+  backfillComprasCorporativas();
+}
+
+// Los navegadores que ya tenían ckl_roles/ckl_users guardados antes de que
+// este rol existiera no reciben el seed inicial (initSeed solo siembra si la
+// key está vacía) — este backfill los pone al día sin tocar el resto de sus datos.
+function backfillComprasCorporativas() {
+  const roles = lsGet<Role[]>(KEYS.roles, []);
+  let comprasRole = roles.find((r) => r.nombre === "compras_corporativas");
+  if (!comprasRole) {
+    const finanzas = roles.find((r) => r.nombre === "finanzas");
+    const newId = Math.max(0, ...roles.map((r) => r.id)) + 1;
+    comprasRole = { id: newId, nombre: "compras_corporativas", permisos: { ...(finanzas?.permisos ?? {}) } };
+    lsSet(KEYS.roles, [...roles, comprasRole]);
+  }
+
+  const users = lsGet<User[]>(KEYS.users, []);
+  if (!users.some((u) => u.correo === "compras@cklass.com")) {
+    const admin = users.find((u) => u.correo === "admin@cklass.com");
+    lsSet(KEYS.users, [
+      ...users,
+      {
+        id: uid("u_"), nombre: "Diego Ramírez", correo: "compras@cklass.com",
+        password: "Compras123!", rfc: "RADI870415KL7", rol_id: comprasRole.id,
+        empresa: "WATA GROUP", jefe_id: admin?.id ?? null, activo: true, initials: "DR",
+      },
+    ]);
   }
 }
 
