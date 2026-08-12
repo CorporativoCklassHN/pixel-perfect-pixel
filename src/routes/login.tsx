@@ -265,8 +265,8 @@ function RecuperarForm({ onBack }: { onBack: () => void }) {
       {step === "solicitar" ? (
         <>
           <p className="mt-1 text-xs text-muted-foreground">
-            Ingresa tu RFC o usuario y te enviaremos un código de un solo uso para restablecer tu
-            contraseña.
+            Ingresa tu RFC o usuario y te enviaremos por correo un código de un solo uso para
+            restablecer tu contraseña.
           </p>
           <form className="mt-4 space-y-4" onSubmit={handleSolicitar}>
             <div>
