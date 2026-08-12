@@ -21,23 +21,36 @@ const MEDIOS_LOCAL = ["Uber", "Taxi", "Metro", "Combi", "Otro"];
 type Row = { id: string; tipo: string; monto: number };
 type OtroRow = { id: string; concepto: string; monto: number };
 
+// Una estancia de hotel dentro de un destino. Puede haber varias si el
+// viajero cambia de hotel a mitad del destino.
+type HotelStay = {
+  id: string;
+  fecha_inicio: string;
+  fecha_fin: string;
+  monto: number;
+  manual: boolean;
+};
+
 type Destino = {
   id: string;
   estado: string;
   fecha_inicio: string;
   fecha_fin: string;
-  hotel_monto: number;
-  hotel_manual: boolean;
+  hoteles: HotelStay[];
   foraneo: Row[];
   local: Row[];
   otros: OtroRow[];
 };
 
+function newHotelStay(fecha_inicio = ""): HotelStay {
+  return { id: uid("h_"), fecha_inicio, fecha_fin: "", monto: 0, manual: false };
+}
+
 function newDestino(): Destino {
   return {
     id: uid("d_"), estado: "Jalisco",
     fecha_inicio: "", fecha_fin: "",
-    hotel_monto: 0, hotel_manual: false,
+    hoteles: [newHotelStay()],
     foraneo: [], local: [], otros: [],
   };
 }
@@ -77,9 +90,11 @@ function Solicitar() {
   const totals = useMemo(() => {
     let foraneo = 0, local = 0, otros = 0, hotel = 0, diasTot = 0;
     for (const d of destinos) {
-      const tarifa = Number(d.hotel_monto) || 0;
-      // Si no es monto manual, hotel_monto es la tarifa por noche: se multiplica por las noches del rango.
-      hotel += d.hotel_manual ? tarifa : tarifa * nightsBetween(d.fecha_inicio, d.fecha_fin);
+      for (const h of d.hoteles) {
+        const tarifa = Number(h.monto) || 0;
+        // Si no es monto manual, monto es la tarifa por noche: se multiplica por las noches de esa estancia.
+        hotel += h.manual ? tarifa : tarifa * nightsBetween(h.fecha_inicio, h.fecha_fin);
+      }
       foraneo += d.foraneo.reduce((a, r) => a + (Number(r.monto) || 0), 0);
       local += d.local.reduce((a, r) => a + (Number(r.monto) || 0), 0);
       otros += d.otros.reduce((a, r) => a + (Number(r.monto) || 0), 0);
@@ -101,6 +116,19 @@ function Solicitar() {
       if (d.fecha_fin < d.fecha_inicio) return toast.error(`La fecha fin del destino ${i + 1} no puede ser anterior a su fecha de inicio.`);
       if (i > 0 && d.fecha_inicio < destinos[i - 1].fecha_fin) {
         return toast.error(`Las fechas del destino ${i + 1} se empalman con el destino ${i}.`);
+      }
+      for (let hi = 0; hi < d.hoteles.length; hi++) {
+        const h = d.hoteles[hi];
+        if (!h.monto) continue;
+        if (!h.fecha_inicio || !h.fecha_fin) {
+          return toast.error(`Captura las fechas del hotel ${hi + 1} en el destino ${i + 1}.`);
+        }
+        if (h.fecha_fin < h.fecha_inicio) {
+          return toast.error(`El check-out del hotel ${hi + 1} (destino ${i + 1}) no puede ser anterior al check-in.`);
+        }
+        if (hi > 0 && h.fecha_inicio < d.hoteles[hi - 1].fecha_fin) {
+          return toast.error(`Las fechas del hotel ${hi + 1} se empalman con el hotel ${hi} (destino ${i + 1}).`);
+        }
       }
     }
     const resumen = destinos.map((d) => d.estado).join(" - ");
@@ -285,26 +313,28 @@ function DestinoBlock({
 }) {
   const filteredHotels = hoteles.filter((h) => h.estado === d.estado && h.activo);
   const days = daysBetween(d.fecha_inicio, d.fecha_fin);
-  const nights = nightsBetween(d.fecha_inicio, d.fecha_fin);
-  const dayLabels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
-  // Solo los días dentro del rango seleccionado (no la semana completa).
-  // Se construyen en UTC para que no se recorran un día al leer el componente
-  // local (p. ej. en zonas horarias detrás de UTC como México).
-  const selectedDays: Date[] = [];
-  if (d.fecha_inicio && days > 0) {
-    const [y, m, dia] = d.fecha_inicio.split("-").map(Number);
-    const startUtc = Date.UTC(y, m - 1, dia);
-    for (let i = 0; i < days; i++) {
-      selectedDays.push(new Date(startUtc + i * 86400000));
-    }
-  }
+  const updateHotel = (hid: string, patch: Partial<HotelStay>) =>
+    onChange({ hoteles: d.hoteles.map((h) => (h.id === hid ? { ...h, ...patch } : h)) });
+
+  const addHotel = () => {
+    const last = d.hoteles[d.hoteles.length - 1];
+    onChange({ hoteles: [...d.hoteles, newHotelStay(last?.fecha_fin || d.fecha_inicio)] });
+  };
+
+  const removeHotel = (hid: string) => onChange({ hoteles: d.hoteles.filter((h) => h.id !== hid) });
 
   return (
     <div className="rounded-[10px] border bg-secondary p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="ckl-badge" style={{ background: "var(--color-primary)", color: "white" }}>Destino {idx + 1}</span>
-        <select className="ckl-input max-w-[180px]" value={d.estado} onChange={(e) => onChange({ estado: e.target.value, hotel_monto: 0 })}>
+        <select
+          className="ckl-input max-w-[180px]"
+          value={d.estado}
+          onChange={(e) =>
+            onChange({ estado: e.target.value, hoteles: d.hoteles.map((h) => ({ ...h, monto: 0 })) })
+          }
+        >
           {ESTADOS.map((s) => <option key={s}>{s}</option>)}
         </select>
         <input
@@ -347,45 +377,103 @@ function DestinoBlock({
         )}
       </div>
 
-      {/* Días seleccionados */}
-      {selectedDays.length > 0 && (
-        <div className="grid grid-cols-7 gap-1.5">
-          {selectedDays.map((dt, i) => (
-            <div key={i} className="rounded-md border bg-white p-2 text-center">
-              <div className="text-[10px] font-semibold uppercase text-muted-foreground">
-                {dayLabels[(dt.getUTCDay() + 6) % 7]}
-              </div>
-              <div className="mt-0.5 text-sm font-bold" style={{ color: "var(--color-primary)" }}>
-                {dt.getUTCDate()}
-              </div>
-            </div>
-          ))}
+      {/* Hoteles */}
+      <div className="mt-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-sm font-semibold">Hoteles</span>
+          <button onClick={addHotel} className="ckl-btn-ghost"><Plus size={12} /> Agregar Hotel</button>
         </div>
-      )}
-
-      {/* Hotel */}
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div>
-          <label className="ckl-label">Hotel:</label>
-          {!d.hotel_manual ? (
-            <select className="ckl-input" value={d.hotel_monto} onChange={(e) => onChange({ hotel_monto: +e.target.value })}>
-              <option value={0}>— Seleccionar —</option>
-              {filteredHotels.map((h) => (
-                <option key={h.id} value={h.tarifa_base}>{h.nombre} — {fmtMoney(h.tarifa_base)}</option>
-              ))}
-            </select>
-          ) : (
-            <input type="number" className="ckl-input" value={d.hotel_monto} onChange={(e) => onChange({ hotel_monto: +e.target.value })} placeholder="Monto manual" />
-          )}
-          <label className="mt-2 flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={d.hotel_manual} onChange={(e) => onChange({ hotel_manual: e.target.checked, hotel_monto: 0 })} />
-            Monto manual
-          </label>
-          {!d.hotel_manual && d.hotel_monto > 0 && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              {nights} noche(s) × {fmtMoney(d.hotel_monto)} = <b>{fmtMoney(nights * d.hotel_monto)}</b>
-            </p>
-          )}
+        <div className="space-y-3">
+          {d.hoteles.map((h, hi) => {
+            const hMin = hi === 0 ? d.fecha_inicio : d.hoteles[hi - 1].fecha_fin || d.fecha_inicio;
+            const hNights = nightsBetween(h.fecha_inicio, h.fecha_fin);
+            return (
+              <div key={h.id} className="rounded-lg border bg-white p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground">Hotel:</span>
+                  <div className="min-w-[200px] flex-1">
+                    {!h.manual ? (
+                      <select
+                        className="ckl-input"
+                        value={h.monto}
+                        onChange={(e) => updateHotel(h.id, { monto: +e.target.value })}
+                      >
+                        <option value={0}>— Seleccionar —</option>
+                        {filteredHotels.map((ho) => (
+                          <option key={ho.id} value={ho.tarifa_base}>{ho.nombre} — {fmtMoney(ho.tarifa_base)}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="number"
+                        className="ckl-input"
+                        value={h.monto}
+                        onChange={(e) => updateHotel(h.id, { monto: +e.target.value })}
+                        placeholder="Monto manual"
+                      />
+                    )}
+                  </div>
+                  <input
+                    type="date"
+                    className="ckl-input max-w-[150px]"
+                    value={h.fecha_inicio}
+                    min={hMin || undefined}
+                    max={d.fecha_fin || undefined}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (hMin && v && v < hMin) {
+                        toast.error(
+                          hi === 0
+                            ? "El check-in no puede ser anterior al inicio del destino."
+                            : `El check-in no puede ser anterior al check-out del hotel ${hi}.`,
+                        );
+                        return;
+                      }
+                      const patch: Partial<HotelStay> = { fecha_inicio: v };
+                      if (h.fecha_fin && v && h.fecha_fin < v) patch.fecha_fin = "";
+                      updateHotel(h.id, patch);
+                    }}
+                  />
+                  <input
+                    type="date"
+                    className="ckl-input max-w-[150px]"
+                    value={h.fecha_fin}
+                    min={h.fecha_inicio || hMin || undefined}
+                    max={d.fecha_fin || undefined}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v && h.fecha_inicio && v < h.fecha_inicio) {
+                        toast.error("El check-out no puede ser anterior al check-in.");
+                        return;
+                      }
+                      updateHotel(h.id, { fecha_fin: v });
+                    }}
+                  />
+                  {d.hoteles.length > 1 && (
+                    <button
+                      onClick={() => removeHotel(h.id)}
+                      className="rounded p-1.5 text-muted-foreground hover:text-foreground"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={h.manual}
+                    onChange={(e) => updateHotel(h.id, { manual: e.target.checked, monto: 0 })}
+                  />
+                  Monto manual
+                </label>
+                {!h.manual && h.monto > 0 && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {hNights} noche(s) × {fmtMoney(h.monto)} = <b>{fmtMoney(hNights * h.monto)}</b>
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
