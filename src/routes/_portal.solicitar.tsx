@@ -1,8 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Plus, X, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Plus, X, CheckCircle2, AlertTriangle, Calendar as CalendarIcon } from "lucide-react";
+import { format, parseISO, isValid } from "date-fns";
+import { es } from "date-fns/locale";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   KEYS, lsGet, lsSet, fmtMoney, nextFolio, uid,
   type Hotel, type Solicitud, type ComprobanteGasto,
@@ -296,6 +300,54 @@ function Tot({ label, v }: { label: string; v: number }) {
   );
 }
 
+// Selector de fecha propio: siempre se muestra/edita en dd/mm/aaaa sin importar
+// el navegador (los <input type="date"> nativos usan el formato/locale del
+// navegador — en Safari puede no ser dd/mm/aaaa). value/onChange usan el mismo
+// formato ISO (yyyy-mm-dd) que ya maneja el resto de las validaciones.
+function DateField({
+  value,
+  onChange,
+  min,
+  max,
+  className = "",
+}: {
+  value: string;
+  onChange: (iso: string) => void;
+  min?: string;
+  max?: string;
+  className?: string;
+}) {
+  const selected = value ? parseISO(value) : undefined;
+  const minDate = min ? parseISO(min) : undefined;
+  const maxDate = max ? parseISO(max) : undefined;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={`ckl-input flex items-center justify-between gap-2 text-left ${className}`}
+        >
+          <span className={selected && isValid(selected) ? "" : "text-muted-foreground"}>
+            {selected && isValid(selected) ? format(selected, "dd/MM/yyyy") : "dd/mm/aaaa"}
+          </span>
+          <CalendarIcon size={14} className="shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          locale={es}
+          selected={selected}
+          defaultMonth={selected ?? minDate ?? maxDate}
+          onSelect={(d) => d && onChange(format(d, "yyyy-MM-dd"))}
+          disabled={(d) => (minDate ? d < minDate : false) || (maxDate ? d > maxDate : false)}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function DestinoBlock({
   idx,
   d,
@@ -337,14 +389,12 @@ function DestinoBlock({
         >
           {ESTADOS.map((s) => <option key={s}>{s}</option>)}
         </select>
-        <input
-          type="date"
-          className="ckl-input max-w-[150px]"
+        <DateField
+          className="max-w-[150px]"
           value={d.fecha_inicio}
           min={minStart}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v && v < minStart) {
+          onChange={(v) => {
+            if (v < minStart) {
               toast.error(
                 idx === 0
                   ? "La fecha de inicio no puede ser anterior a hoy."
@@ -353,18 +403,16 @@ function DestinoBlock({
               return;
             }
             const patch: Partial<Destino> = { fecha_inicio: v };
-            if (d.fecha_fin && v && d.fecha_fin < v) patch.fecha_fin = "";
+            if (d.fecha_fin && d.fecha_fin < v) patch.fecha_fin = "";
             onChange(patch);
           }}
         />
-        <input
-          type="date"
-          className="ckl-input max-w-[150px]"
+        <DateField
+          className="max-w-[150px]"
           value={d.fecha_fin}
           min={d.fecha_inicio || minStart}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v && d.fecha_inicio && v < d.fecha_inicio) {
+          onChange={(v) => {
+            if (d.fecha_inicio && v < d.fecha_inicio) {
               toast.error("La fecha fin no puede ser anterior a la fecha de inicio.");
               return;
             }
@@ -413,15 +461,13 @@ function DestinoBlock({
                       />
                     )}
                   </div>
-                  <input
-                    type="date"
-                    className="ckl-input max-w-[150px]"
+                  <DateField
+                    className="max-w-[150px]"
                     value={h.fecha_inicio}
-                    min={hMin || undefined}
-                    max={d.fecha_fin || undefined}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (hMin && v && v < hMin) {
+                    min={hMin}
+                    max={d.fecha_fin}
+                    onChange={(v) => {
+                      if (hMin && v < hMin) {
                         toast.error(
                           hi === 0
                             ? "El check-in no puede ser anterior al inicio del destino."
@@ -430,19 +476,17 @@ function DestinoBlock({
                         return;
                       }
                       const patch: Partial<HotelStay> = { fecha_inicio: v };
-                      if (h.fecha_fin && v && h.fecha_fin < v) patch.fecha_fin = "";
+                      if (h.fecha_fin && h.fecha_fin < v) patch.fecha_fin = "";
                       updateHotel(h.id, patch);
                     }}
                   />
-                  <input
-                    type="date"
-                    className="ckl-input max-w-[150px]"
+                  <DateField
+                    className="max-w-[150px]"
                     value={h.fecha_fin}
-                    min={h.fecha_inicio || hMin || undefined}
-                    max={d.fecha_fin || undefined}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v && h.fecha_inicio && v < h.fecha_inicio) {
+                    min={h.fecha_inicio || hMin}
+                    max={d.fecha_fin}
+                    onChange={(v) => {
+                      if (h.fecha_inicio && v < h.fecha_inicio) {
                         toast.error("El check-out no puede ser anterior al check-in.");
                         return;
                       }
@@ -458,7 +502,7 @@ function DestinoBlock({
                     </button>
                   )}
                 </div>
-                <label className="mt-2 flex items-center gap-2 text-xs">
+                <label className="mt-2 inline-flex items-center gap-2 text-xs">
                   <input
                     type="checkbox"
                     checked={h.manual}
