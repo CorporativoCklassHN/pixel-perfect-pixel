@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Edit2, Plus } from "lucide-react";
+import { Edit2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useLocalStorage } from "@/lib/auth";
-import { KEYS, type Sociedad, type Role } from "@/lib/store";
+import { KEYS, type Sociedad, type Role, type User } from "@/lib/store";
 import { Modal } from "./_portal.solicitar";
 
 // Normaliza el nombre capturado a un identificador consistente con el resto
@@ -33,6 +33,7 @@ function Configuracion() {
   const [config, setConfig] = useLocalStorage<Config>(KEYS.config, { monto_comida_diario: 450, umbral_finanzas: 5000, dia_deposito: "Viernes", email_compras: "compras@cklass.com" });
   const [sociedades, setSociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
   const [roles, setRoles] = useLocalStorage<Role[]>(KEYS.roles, []);
+  const [users] = useLocalStorage<User[]>(KEYS.users, []);
   const [draft, setDraft] = useState<Config>(config);
   const [edit, setEdit] = useState<Sociedad | null>(null);
   const [editRole, setEditRole] = useState<{ nombre: string; copyFrom: number } | null>(null);
@@ -64,6 +65,18 @@ function Configuracion() {
     setRoles([...roles, { id: newId, nombre, permisos: { ...(template?.permisos ?? {}) } }]);
     toast.success(`Rol "${nombre}" creado. Ajusta sus permisos en Permisos.`);
     setEditRole(null);
+  };
+
+  const deleteRole = (r: Role) => {
+    const enUso = users.filter((u) => u.rol_id === r.id).length;
+    if (enUso > 0) {
+      return toast.error(
+        `No se puede eliminar "${r.nombre}": ${enUso} usuario(s) lo tienen asignado.`,
+      );
+    }
+    if (!confirm(`¿Eliminar el rol "${r.nombre}"? Esta acción no se puede deshacer.`)) return;
+    setRoles(roles.filter((x) => x.id !== r.id));
+    toast.success("Rol eliminado.");
   };
 
   return (
@@ -118,8 +131,19 @@ function Configuracion() {
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {roles.map((r) => (
-            <span key={r.id} className="ckl-badge" style={{ background: "#F1F3F5", color: "#333" }}>
+            <span
+              key={r.id}
+              className="ckl-badge inline-flex items-center gap-1.5"
+              style={{ background: "#F1F3F5", color: "#333" }}
+            >
               {r.nombre}
+              <button
+                onClick={() => deleteRole(r)}
+                className="rounded-full p-0.5 hover:bg-black/10"
+                title={`Eliminar rol ${r.nombre}`}
+              >
+                <X size={11} />
+              </button>
             </span>
           ))}
         </div>
