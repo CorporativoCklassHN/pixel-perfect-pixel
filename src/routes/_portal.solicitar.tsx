@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, X, CheckCircle2, AlertTriangle, Calendar as CalendarIcon } from "lucide-react";
 import { format, parseISO, isValid } from "date-fns";
 import { es } from "date-fns/locale";
@@ -9,10 +9,14 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   KEYS, lsGet, lsSet, fmtMoney, nextFolio, uid,
-  type Hotel, type Solicitud, type ComprobanteGasto,
+  type Hotel, type Solicitud, type ComprobanteGasto, type Autorizacion,
 } from "@/lib/store";
 
 export const Route = createFileRoute("/_portal/solicitar")({
+  validateSearch: (search: Record<string, unknown>): { editId?: string } => {
+    const editId = typeof search.editId === "string" ? search.editId : undefined;
+    return editId ? { editId } : {};
+  },
   head: () => ({ meta: [{ title: "Solicitar viáticos — CKL" }] }),
   component: Solicitar,
 });
@@ -59,6 +63,34 @@ function newDestino(): Destino {
   };
 }
 
+// Reconstruye un Destino guardado en KEYS.destinos, tolerando el esquema
+// anterior (hotel_monto/hotel_manual de un solo hotel) para poder editar
+// solicitudes creadas antes de que existiera el arreglo `hoteles`.
+function normalizeDestino(raw: any): Destino {
+  const hoteles: HotelStay[] =
+    Array.isArray(raw.hoteles) && raw.hoteles.length
+      ? raw.hoteles
+      : [
+          {
+            id: uid("h_"),
+            fecha_inicio: raw.fecha_inicio ?? "",
+            fecha_fin: raw.fecha_fin ?? "",
+            monto: raw.hotel_monto ?? 0,
+            manual: raw.hotel_manual ?? false,
+          },
+        ];
+  return {
+    id: raw.id ?? uid("d_"),
+    estado: raw.estado ?? "Jalisco",
+    fecha_inicio: raw.fecha_inicio ?? "",
+    fecha_fin: raw.fecha_fin ?? "",
+    hoteles,
+    foraneo: raw.foraneo ?? [],
+    local: raw.local ?? [],
+    otros: raw.otros ?? [],
+  };
+}
+
 function daysBetween(a: string, b: string) {
   if (!a || !b) return 0;
   const d1 = new Date(a), d2 = new Date(b);
@@ -73,19 +105,46 @@ function nightsBetween(a: string, b: string) {
 function Solicitar() {
   const { user } = useAuth();
   const nav = useNavigate();
+  const { editId } = Route.useSearch();
   const origenes = lsGet<string[]>(KEYS.origenes, []);
   const hoteles = lsGet<Hotel[]>(KEYS.hoteles, []);
   const config = lsGet<{ monto_comida_diario: number; umbral_finanzas: number }>(KEYS.config, { monto_comida_diario: 450, umbral_finanzas: 5000 });
 
-  const [folio] = useState(nextFolio());
+  // Solo se puede editar la propia solicitud mientras esté Abierta y sin
+  // ninguna autorización/rechazo registrado — mismo criterio que "canEdit" en Estatus.
+  const editing = useMemo(() => {
+    if (!editId) return null;
+    const found = lsGet<Solicitud[]>(KEYS.solicitudes, []).find((s) => s.id === editId);
+    if (!found) return null;
+    const autorizaciones = lsGet<Autorizacion[]>(KEYS.autorizaciones, []);
+    const puedeEditar =
+      found.user_id === user?.id &&
+      found.estatus === "Abierto" &&
+      !autorizaciones.some((a) => a.solicitud_id === found.id);
+    return puedeEditar ? found : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editId, user]);
+
+  useEffect(() => {
+    if (editId && !editing) {
+      toast.error("Esa solicitud ya no se puede editar.");
+      nav({ to: "/estatus" });
+    }
+  }, [editId, editing, nav]);
+
+  const [folio] = useState(() => editing?.folio ?? nextFolio());
   const today = new Date().toLocaleDateString("es-MX");
   const todayIso = new Date().toISOString().slice(0, 10);
-  const [origen, setOrigen] = useState(origenes[0] ?? "");
-  const [tipo, setTipo] = useState(TIPOS[0]);
-  const [personas, setPersonas] = useState(1);
-  const [nombres, setNombres] = useState(user?.nombre ?? "");
-  const [motivo, setMotivo] = useState("");
-  const [destinos, setDestinos] = useState<Destino[]>([newDestino()]);
+  const [origen, setOrigen] = useState(() => editing?.origen ?? origenes[0] ?? "");
+  const [tipo, setTipo] = useState(() => editing?.tipo_viaje ?? TIPOS[0]);
+  const [personas, setPersonas] = useState(() => editing?.personas_count ?? 1);
+  const [nombres, setNombres] = useState(() => editing?.personas_nombres ?? user?.nombre ?? "");
+  const [motivo, setMotivo] = useState(() => editing?.motivo ?? "");
+  const [destinos, setDestinos] = useState<Destino[]>(() => {
+    if (!editing) return [newDestino()];
+    const stored = lsGet<any[]>(KEYS.destinos, []).filter((d) => d.solicitud_id === editing.id);
+    return stored.length ? stored.map(normalizeDestino) : [newDestino()];
+  });
   const [showModal, setShowModal] = useState(false);
 
   const updateD = (id: string, patch: Partial<Destino>) =>
@@ -136,35 +195,85 @@ function Solicitar() {
       }
     }
     const resumen = destinos.map((d) => d.estado).join(" - ");
-    const sol: Solicitud = {
-      id: uid("s_"), folio, user_id: user!.id, fecha: today,
-      empresa: user!.empresa, origen,
-      destino_resumen: `${origen} - ${resumen}`,
-      tipo_viaje: tipo, motivo,
-      personas_count: personas, personas_nombres: nombres,
-      monto_total: totals.total,
-      jefe_status: "Pendiente",
-      finanzas_status: requiresFin ? "Pendiente" : "N/A",
-      estatus: "Abierto", comprobante_viaje: null,
-      created_at: new Date().toISOString().slice(0, 10),
-    };
+    const solId = editing?.id ?? uid("s_");
+
+    const sol: Solicitud = editing
+      ? {
+          ...editing,
+          origen,
+          destino_resumen: `${origen} - ${resumen}`,
+          tipo_viaje: tipo, motivo,
+          personas_count: personas, personas_nombres: nombres,
+          monto_total: totals.total,
+          finanzas_status: requiresFin ? "Pendiente" : "N/A",
+        }
+      : {
+          id: solId, folio, user_id: user!.id, fecha: today,
+          empresa: user!.empresa, origen,
+          destino_resumen: `${origen} - ${resumen}`,
+          tipo_viaje: tipo, motivo,
+          personas_count: personas, personas_nombres: nombres,
+          monto_total: totals.total,
+          jefe_status: "Pendiente",
+          finanzas_status: requiresFin ? "Pendiente" : "N/A",
+          estatus: "Abierto", comprobante_viaje: null,
+          created_at: new Date().toISOString().slice(0, 10),
+        };
+
     const list = lsGet<Solicitud[]>(KEYS.solicitudes, []);
-    lsSet(KEYS.solicitudes, [sol, ...list]);
+    lsSet(KEYS.solicitudes, editing ? list.map((s) => (s.id === solId ? sol : s)) : [sol, ...list]);
 
-    const dList = lsGet<any[]>(KEYS.destinos, []);
-    lsSet(KEYS.destinos, [...dList, ...destinos.map((d) => ({ ...d, solicitud_id: sol.id }))]);
+    const dList = lsGet<any[]>(KEYS.destinos, []).filter((d) => d.solicitud_id !== solId);
+    lsSet(KEYS.destinos, [...dList, ...destinos.map((d) => ({ ...d, solicitud_id: solId }))]);
 
-    const cg = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+    const cg = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []).filter(
+      (c) => c.solicitud_id !== solId,
+    );
     const newCg: ComprobanteGasto[] = [
-      { id: uid("cg_"), solicitud_id: sol.id, concepto: "Hotel", monto_solicitado: totals.hotel, monto_comprobado: 0, status_renglon: "pendiente" },
-      { id: uid("cg_"), solicitud_id: sol.id, concepto: "Transporte foráneo", monto_solicitado: totals.foraneo, monto_comprobado: 0, status_renglon: "pendiente" },
-      { id: uid("cg_"), solicitud_id: sol.id, concepto: "Transporte local", monto_solicitado: totals.local, monto_comprobado: 0, status_renglon: "pendiente" },
-      { id: uid("cg_"), solicitud_id: sol.id, concepto: "Comida", monto_solicitado: totals.comida, monto_comprobado: 0, status_renglon: "pendiente" },
-      { id: uid("cg_"), solicitud_id: sol.id, concepto: "Otros", monto_solicitado: totals.otros, monto_comprobado: 0, status_renglon: "pendiente" },
+      {
+        id: uid("cg_"),
+        solicitud_id: solId,
+        concepto: "Hotel",
+        monto_solicitado: totals.hotel,
+        monto_comprobado: 0,
+        status_renglon: "pendiente",
+      },
+      {
+        id: uid("cg_"),
+        solicitud_id: solId,
+        concepto: "Transporte foráneo",
+        monto_solicitado: totals.foraneo,
+        monto_comprobado: 0,
+        status_renglon: "pendiente",
+      },
+      {
+        id: uid("cg_"),
+        solicitud_id: solId,
+        concepto: "Transporte local",
+        monto_solicitado: totals.local,
+        monto_comprobado: 0,
+        status_renglon: "pendiente",
+      },
+      {
+        id: uid("cg_"),
+        solicitud_id: solId,
+        concepto: "Comida",
+        monto_solicitado: totals.comida,
+        monto_comprobado: 0,
+        status_renglon: "pendiente",
+      },
+      {
+        id: uid("cg_"),
+        solicitud_id: solId,
+        concepto: "Otros",
+        monto_solicitado: totals.otros,
+        monto_comprobado: 0,
+        status_renglon: "pendiente",
+      },
     ];
     lsSet(KEYS.comprobantesGasto, [...cg, ...newCg]);
 
-    toast.success(`Solicitud ${folio} registrada.`);
+    toast.success(editing ? `Solicitud ${folio} actualizada.` : `Solicitud ${folio} registrada.`);
     setShowModal(true);
   };
 
@@ -192,7 +301,9 @@ function Solicitar() {
       {/* General */}
       <section className="ckl-card p-5">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold">Datos generales</h2>
+          <h2 className="text-base font-semibold">
+            {editing ? "Editar solicitud" : "Datos generales"}
+          </h2>
           <span className="ckl-badge" style={{ background: "var(--color-primary-soft)", color: "var(--color-primary)" }}>Folio {folio}</span>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
@@ -259,7 +370,9 @@ function Solicitar() {
           </span>
           <div className="flex gap-2">
             <button onClick={() => nav({ to: "/estatus" })} className="ckl-btn-outline">Cancelar</button>
-            <button onClick={guardar} className="ckl-btn-primary">Guardar solicitud</button>
+            <button onClick={guardar} className="ckl-btn-primary">
+              {editing ? "Guardar cambios" : "Guardar solicitud"}
+            </button>
           </div>
         </div>
       </div>
@@ -270,9 +383,13 @@ function Solicitar() {
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full" style={{ background: "#D8F3DC", color: "#2D6A4F" }}>
               <CheckCircle2 size={32} />
             </div>
-            <h3 className="mt-4 text-lg font-semibold">¡Solicitud registrada!</h3>
+            <h3 className="mt-4 text-lg font-semibold">
+              {editing ? "¡Solicitud actualizada!" : "¡Solicitud registrada!"}
+            </h3>
             <p className="mt-2 text-sm text-muted-foreground">
-              Sus viáticos se depositarán el siguiente viernes después de su solicitud, una vez autorizados.
+              {editing
+                ? "Los cambios se guardaron correctamente."
+                : "Sus viáticos se depositarán el siguiente viernes después de su solicitud, una vez autorizados."}
             </p>
             <button onClick={() => nav({ to: "/estatus" })} className="ckl-btn-primary mt-5">Ver mis solicitudes</button>
           </div>
@@ -309,12 +426,14 @@ function DateField({
   onChange,
   min,
   max,
+  disabled,
   className = "",
 }: {
   value: string;
   onChange: (iso: string) => void;
   min?: string;
   max?: string;
+  disabled?: boolean;
   className?: string;
 }) {
   const selected = value ? parseISO(value) : undefined;
@@ -326,7 +445,8 @@ function DateField({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={`ckl-input flex items-center justify-between gap-2 text-left ${className}`}
+          disabled={disabled}
+          className={`ckl-input flex items-center justify-between gap-2 text-left disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
         >
           <span className={selected && isValid(selected) ? "" : "text-muted-foreground"}>
             {selected && isValid(selected) ? format(selected, "dd/MM/yyyy") : "dd/mm/aaaa"}
@@ -431,6 +551,11 @@ function DestinoBlock({
           <span className="text-sm font-semibold">Hoteles</span>
           <button onClick={addHotel} className="ckl-btn-ghost"><Plus size={12} /> Agregar Hotel</button>
         </div>
+        {(!d.fecha_inicio || !d.fecha_fin) && (
+          <p className="mb-2 text-[11px]" style={{ color: "var(--color-warning)" }}>
+            Selecciona primero las fechas del destino para habilitar las fechas de hotel.
+          </p>
+        )}
         <div className="space-y-3">
           {d.hoteles.map((h, hi) => {
             const hMin = hi === 0 ? d.fecha_inicio : d.hoteles[hi - 1].fecha_fin || d.fecha_inicio;
@@ -466,6 +591,7 @@ function DestinoBlock({
                     value={h.fecha_inicio}
                     min={hMin}
                     max={d.fecha_fin}
+                    disabled={!d.fecha_inicio || !d.fecha_fin}
                     onChange={(v) => {
                       if (hMin && v < hMin) {
                         toast.error(
@@ -485,6 +611,7 @@ function DestinoBlock({
                     value={h.fecha_fin}
                     min={h.fecha_inicio || hMin}
                     max={d.fecha_fin}
+                    disabled={!d.fecha_inicio || !d.fecha_fin}
                     onChange={(v) => {
                       if (h.fecha_inicio && v < h.fecha_inicio) {
                         toast.error("El check-out no puede ser anterior al check-in.");

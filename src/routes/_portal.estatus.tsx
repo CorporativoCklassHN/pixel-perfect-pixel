@@ -1,6 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Search, MessageSquareWarning, Upload, Check, X } from "lucide-react";
+import { Search, MessageSquareWarning, Upload, Check, X, Edit2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useLocalStorage } from "@/lib/auth";
@@ -23,6 +23,7 @@ export const Route = createFileRoute("/_portal/estatus")({
 
 function Estatus() {
   const { user, role } = useAuth();
+  const nav = useNavigate();
   const [solicitudes, setSolicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
   const [autorizaciones, setAutorizaciones] = useLocalStorage<Autorizacion[]>(KEYS.autorizaciones, []);
   const [users] = useLocalStorage<User[]>(KEYS.users, []);
@@ -201,6 +202,16 @@ function Estatus() {
           <div className="mt-5 flex flex-wrap justify-end gap-2">
             {canEdit(detail) && (
               <>
+                <button
+                  onClick={() => {
+                    const id = detail.id;
+                    setDetail(null);
+                    nav({ to: "/solicitar", search: { editId: id } });
+                  }}
+                  className="ckl-btn-outline"
+                >
+                  <Edit2 size={14} /> Editar
+                </button>
                 <button onClick={() => eliminar(detail)} className="ckl-btn-outline">Eliminar</button>
               </>
             )}
