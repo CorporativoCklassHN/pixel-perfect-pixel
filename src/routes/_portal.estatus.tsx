@@ -4,6 +4,7 @@ import { Search, MessageSquareWarning, Upload, Check, X, Edit2 } from "lucide-re
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useLocalStorage } from "@/lib/auth";
+import { showErrorDialog } from "@/components/ErrorDialog";
 import {
   KEYS,
   fmtMoney,
@@ -84,7 +85,7 @@ function Estatus() {
   };
 
   const reject = () => {
-    if (!rejecting || !rejectNote.trim()) return toast.error("Captura el motivo.");
+    if (!rejecting || !rejectNote.trim()) return showErrorDialog("Captura el motivo.");
     const which = canAuth(rejecting);
     const newAuth: Autorizacion = {
       id: uid("a_"), solicitud_id: rejecting.id,
@@ -93,7 +94,7 @@ function Estatus() {
     };
     setAutorizaciones([...autorizaciones, newAuth]);
     setSolicitudes(solicitudes.map((x) => x.id === rejecting.id ? { ...x, estatus: "Rechazado", nota_rechazo: rejectNote, [which === "finanzas" ? "finanzas_status" : "jefe_status"]: "Rechazado" } as Solicitud : x));
-    toast.error(`Solicitud ${rejecting.folio} rechazada.`);
+    showErrorDialog(`Solicitud ${rejecting.folio} rechazada.`);
     setRejecting(null); setRejectNote(""); setDetail(null);
   };
 
@@ -104,7 +105,7 @@ function Estatus() {
   };
 
   const eliminar = (s: Solicitud) => {
-    if (autorizaciones.find((a) => a.solicitud_id === s.id)) return toast.error("No se puede eliminar: ya tiene autorizaciones.");
+    if (autorizaciones.find((a) => a.solicitud_id === s.id)) return showErrorDialog("No se puede eliminar: ya tiene autorizaciones.");
     if (!confirm(`¿Eliminar solicitud ${s.folio}?`)) return;
     setSolicitudes(solicitudes.filter((x) => x.id !== s.id));
     toast.success("Solicitud eliminada.");

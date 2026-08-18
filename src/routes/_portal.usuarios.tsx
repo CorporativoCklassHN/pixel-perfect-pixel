@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Edit2, Plus, UserCog } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useLocalStorage } from "@/lib/auth";
+import { showErrorDialog } from "@/components/ErrorDialog";
 import { KEYS, type Role, type User, uid } from "@/lib/store";
 import { Modal } from "./_portal.solicitar";
 
@@ -36,19 +37,19 @@ function Usuarios() {
   const canModify = (u: User) => soyAdmin || roleName(u.rol_id) !== "administrador";
 
   const toggleActive = (u: User) => {
-    if (!canModify(u)) return toast.error(ADMIN_LOCK_MSG);
+    if (!canModify(u)) return showErrorDialog(ADMIN_LOCK_MSG);
     setUsers(users.map((x) => (x.id === u.id ? { ...x, activo: !x.activo } : x)));
   };
 
   const openEdit = (u: User) => {
-    if (!canModify(u)) return toast.error(ADMIN_LOCK_MSG);
+    if (!canModify(u)) return showErrorDialog(ADMIN_LOCK_MSG);
     setCreating(false);
     setEdit(u);
   };
 
   const save = (u: User) => {
     if (roleName(u.rol_id) === "administrador" && !soyAdmin) {
-      toast.error("Solo un administrador puede asignar el rol de administrador.");
+      showErrorDialog("Solo un administrador puede asignar el rol de administrador.");
       return;
     }
     if (creating) {

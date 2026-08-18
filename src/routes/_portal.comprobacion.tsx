@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Upload, FileText, FileCode, Edit2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useLocalStorage } from "@/lib/auth";
+import { showErrorDialog } from "@/components/ErrorDialog";
 import { KEYS, fmtMoney, uid, type Solicitud, type ComprobanteGasto } from "@/lib/store";
 
 export const Route = createFileRoute("/_portal/comprobacion")({
@@ -48,7 +49,7 @@ function Comprobacion() {
       if (!file || !sel) return;
       if (fs.some((f) => f.archivo === file.name)) {
         addLog(`✖ Archivo duplicado: ${file.name}`);
-        toast.error(`El archivo "${file.name}" ya fue cargado para esta solicitud.`);
+        showErrorDialog(`El archivo "${file.name}" ya fue cargado para esta solicitud.`);
         return;
       }
       let total = Math.floor(Math.random() * 800) + 200;
@@ -96,7 +97,7 @@ function Comprobacion() {
         }
         toast.success("Comprobante cargado y verificado.");
       } else {
-        toast.error("Error de validación. Revisa el log.");
+        showErrorDialog("Error de validación. Revisa el log.");
       }
       const factura: Factura = {
         id: uid("f_"), solicitud_id: sid, tipo: kind,

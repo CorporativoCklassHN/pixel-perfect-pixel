@@ -5,6 +5,7 @@ import { format, parseISO, isValid } from "date-fns";
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
+import { showErrorDialog } from "@/components/ErrorDialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -127,7 +128,7 @@ function Solicitar() {
 
   useEffect(() => {
     if (editId && !editing) {
-      toast.error("Esa solicitud ya no se puede editar.");
+      showErrorDialog("Esa solicitud ya no se puede editar.");
       nav({ to: "/estatus" });
     }
   }, [editId, editing, nav]);
@@ -171,26 +172,32 @@ function Solicitar() {
   const requiresFin = totals.total > config.umbral_finanzas;
 
   const guardar = () => {
-    if (!motivo.trim()) return toast.error("Captura el motivo del viaje.");
+    if (!motivo.trim()) return showErrorDialog("Captura el motivo del viaje.");
     for (let i = 0; i < destinos.length; i++) {
       const d = destinos[i];
-      if (!d.fecha_inicio || !d.fecha_fin) return toast.error(`Captura las fechas del destino ${i + 1}.`);
-      if (d.fecha_inicio < todayIso) return toast.error(`La fecha de inicio del destino ${i + 1} no puede ser anterior a hoy.`);
-      if (d.fecha_fin < d.fecha_inicio) return toast.error(`La fecha fin del destino ${i + 1} no puede ser anterior a su fecha de inicio.`);
+      if (!d.fecha_inicio || !d.fecha_fin) return showErrorDialog(`Captura las fechas del destino ${i + 1}.`);
+      if (d.fecha_inicio < todayIso) {
+        return showErrorDialog(`La fecha de inicio del destino ${i + 1} no puede ser anterior a hoy.`);
+      }
+      if (d.fecha_fin < d.fecha_inicio) {
+        return showErrorDialog(
+          `La fecha fin del destino ${i + 1} no puede ser anterior a su fecha de inicio.`,
+        );
+      }
       if (i > 0 && d.fecha_inicio < destinos[i - 1].fecha_fin) {
-        return toast.error(`Las fechas del destino ${i + 1} se empalman con el destino ${i}.`);
+        return showErrorDialog(`Las fechas del destino ${i + 1} se empalman con el destino ${i}.`);
       }
       for (let hi = 0; hi < d.hoteles.length; hi++) {
         const h = d.hoteles[hi];
         if (!h.monto) continue;
         if (!h.fecha_inicio || !h.fecha_fin) {
-          return toast.error(`Captura las fechas del hotel ${hi + 1} en el destino ${i + 1}.`);
+          return showErrorDialog(`Captura las fechas del hotel ${hi + 1} en el destino ${i + 1}.`);
         }
         if (h.fecha_fin < h.fecha_inicio) {
-          return toast.error(`El check-out del hotel ${hi + 1} (destino ${i + 1}) no puede ser anterior al check-in.`);
+          return showErrorDialog(`El check-out del hotel ${hi + 1} (destino ${i + 1}) no puede ser anterior al check-in.`);
         }
         if (hi > 0 && h.fecha_inicio < d.hoteles[hi - 1].fecha_fin) {
-          return toast.error(`Las fechas del hotel ${hi + 1} se empalman con el hotel ${hi} (destino ${i + 1}).`);
+          return showErrorDialog(`Las fechas del hotel ${hi + 1} se empalman con el hotel ${hi} (destino ${i + 1}).`);
         }
       }
     }
@@ -515,7 +522,7 @@ function DestinoBlock({
           min={minStart}
           onChange={(v) => {
             if (v < minStart) {
-              toast.error(
+              showErrorDialog(
                 idx === 0
                   ? "La fecha de inicio no puede ser anterior a hoy."
                   : `La fecha de inicio no puede ser anterior a la fecha fin del destino ${idx}.`,
@@ -533,7 +540,7 @@ function DestinoBlock({
           min={d.fecha_inicio || minStart}
           onChange={(v) => {
             if (d.fecha_inicio && v < d.fecha_inicio) {
-              toast.error("La fecha fin no puede ser anterior a la fecha de inicio.");
+              showErrorDialog("La fecha fin no puede ser anterior a la fecha de inicio.");
               return;
             }
             onChange({ fecha_fin: v });
@@ -594,7 +601,7 @@ function DestinoBlock({
                     disabled={!d.fecha_inicio || !d.fecha_fin}
                     onChange={(v) => {
                       if (hMin && v < hMin) {
-                        toast.error(
+                        showErrorDialog(
                           hi === 0
                             ? "El check-in no puede ser anterior al inicio del destino."
                             : `El check-in no puede ser anterior al check-out del hotel ${hi}.`,
@@ -614,7 +621,7 @@ function DestinoBlock({
                     disabled={!d.fecha_inicio || !d.fecha_fin}
                     onChange={(v) => {
                       if (h.fecha_inicio && v < h.fecha_inicio) {
-                        toast.error("El check-out no puede ser anterior al check-in.");
+                        showErrorDialog("El check-out no puede ser anterior al check-in.");
                         return;
                       }
                       updateHotel(h.id, { fecha_fin: v });

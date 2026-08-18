@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { showErrorDialog } from "@/components/ErrorDialog";
 import {
   KEYS,
   lsGet,
@@ -44,7 +45,7 @@ function LoginPage() {
       toast.success(`Bienvenido`);
       navigate({ to: "/dashboard" });
     } else {
-      toast.error("Credenciales incorrectas.");
+      showErrorDialog("Credenciales incorrectas.");
     }
   };
 
@@ -162,11 +163,11 @@ function PreAltaForm({ onBack }: { onBack: () => void }) {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!f.nombre || !f.correo || !f.password) {
-      toast.error("Completa los campos obligatorios.");
+      showErrorDialog("Completa los campos obligatorios.");
       return;
     }
     if (f.password !== f.confirm) {
-      toast.error("Las contraseñas no coinciden.");
+      showErrorDialog("Las contraseñas no coinciden.");
       return;
     }
     const list = lsGet<unknown[]>(KEYS.prealtas, []);
@@ -225,7 +226,7 @@ function RecuperarForm({ onBack }: { onBack: () => void }) {
     e.preventDefault();
     const result = generateResetCode(identifier);
     if (!result) {
-      toast.error("No encontramos una cuenta activa con ese RFC/usuario.");
+      showErrorDialog("No encontramos una cuenta activa con ese RFC/usuario.");
       return;
     }
     setDemoCode(result.code);
@@ -236,18 +237,18 @@ function RecuperarForm({ onBack }: { onBack: () => void }) {
   const handleCambiar = (e: React.FormEvent) => {
     e.preventDefault();
     if (newPass.length < 6) {
-      toast.error("La contraseña debe tener al menos 6 caracteres.");
+      showErrorDialog("La contraseña debe tener al menos 6 caracteres.");
       return;
     }
     if (newPass !== confirmPass) {
-      toast.error("Las contraseñas no coinciden.");
+      showErrorDialog("Las contraseñas no coinciden.");
       return;
     }
     if (resetPasswordWithCode(identifier, code, newPass)) {
       toast.success("Contraseña actualizada. Ya puedes iniciar sesión.");
       onBack();
     } else {
-      toast.error("Código inválido o expirado.");
+      showErrorDialog("Código inválido o expirado.");
     }
   };
 

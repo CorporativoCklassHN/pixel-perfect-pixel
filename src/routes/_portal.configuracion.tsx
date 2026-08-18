@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Edit2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useLocalStorage } from "@/lib/auth";
+import { showErrorDialog } from "@/components/ErrorDialog";
 import { KEYS, type Sociedad, type Role, type User } from "@/lib/store";
 import { Modal } from "./_portal.solicitar";
 
@@ -58,8 +59,8 @@ function Configuracion() {
   const saveRole = () => {
     if (!editRole) return;
     const nombre = slugifyRole(editRole.nombre);
-    if (!nombre) return toast.error("Captura un nombre para el rol.");
-    if (roles.some((r) => r.nombre === nombre)) return toast.error("Ya existe un rol con ese nombre.");
+    if (!nombre) return showErrorDialog("Captura un nombre para el rol.");
+    if (roles.some((r) => r.nombre === nombre)) return showErrorDialog("Ya existe un rol con ese nombre.");
     const template = roles.find((r) => r.id === editRole.copyFrom);
     const newId = Math.max(0, ...roles.map((r) => r.id)) + 1;
     setRoles([...roles, { id: newId, nombre, permisos: { ...(template?.permisos ?? {}) } }]);
@@ -70,7 +71,7 @@ function Configuracion() {
   const deleteRole = (r: Role) => {
     const enUso = users.filter((u) => u.rol_id === r.id).length;
     if (enUso > 0) {
-      return toast.error(
+      return showErrorDialog(
         `No se puede eliminar "${r.nombre}": ${enUso} usuario(s) lo tienen asignado.`,
       );
     }
