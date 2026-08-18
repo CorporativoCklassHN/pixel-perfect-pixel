@@ -24,7 +24,7 @@ export const Route = createFileRoute("/_portal/solicitar")({
 
 const ESTADOS = ["Jalisco", "CDMX", "Guanajuato", "Nuevo León", "Querétaro", "Colima", "Zacatecas"];
 const TIPOS = ["Comercial", "Auditoría", "Visita a tiendas", "Capacitación", "Expos", "Visita a proveedores", "Otros"];
-const MEDIOS_FORANEO = ["Avión", "Camión", "Tren", "Barco", "Otro"];
+const MEDIOS_FORANEO = ["Avión", "Autobús", "Tren", "Barco", "Otro"];
 const MEDIOS_LOCAL = ["Uber", "Taxi", "Metro", "Combi", "Otro"];
 
 type Row = { id: string; tipo: string; monto: number };
@@ -198,6 +198,30 @@ function Solicitar() {
         }
         if (hi > 0 && h.fecha_inicio < d.hoteles[hi - 1].fecha_fin) {
           return showErrorDialog(`Las fechas del hotel ${hi + 1} se empalman con el hotel ${hi} (destino ${i + 1}).`);
+        }
+      }
+      // Si se está cobrando hotel en este destino, las estancias deben cubrir
+      // exactamente todo el rango del destino, sin huecos entre ellas.
+      const hotelesUsados = d.hoteles.filter((h) => h.monto > 0);
+      if (hotelesUsados.length > 0) {
+        const fmtFecha = (iso: string) => format(parseISO(iso), "dd/MM/yyyy");
+        if (hotelesUsados[0].fecha_inicio !== d.fecha_inicio) {
+          return showErrorDialog(
+            `El primer hotel del destino ${i + 1} debe iniciar el ${fmtFecha(d.fecha_inicio)} (inicio del destino).`,
+          );
+        }
+        for (let k = 1; k < hotelesUsados.length; k++) {
+          if (hotelesUsados[k].fecha_inicio !== hotelesUsados[k - 1].fecha_fin) {
+            return showErrorDialog(
+              `Hay un hueco entre las fechas de los hoteles del destino ${i + 1}. Cúbrelo o ajusta las fechas.`,
+            );
+          }
+        }
+        const ultimoHotel = hotelesUsados[hotelesUsados.length - 1];
+        if (ultimoHotel.fecha_fin !== d.fecha_fin) {
+          return showErrorDialog(
+            `El último hotel del destino ${i + 1} debe terminar el ${fmtFecha(d.fecha_fin)} (fin del destino).`,
+          );
         }
       }
     }
