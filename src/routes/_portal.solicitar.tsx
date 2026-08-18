@@ -200,16 +200,20 @@ function Solicitar() {
           return showErrorDialog(`Las fechas del hotel ${hi + 1} se empalman con el hotel ${hi} (destino ${i + 1}).`);
         }
       }
-      // Si se está cobrando hotel en este destino, ninguna estancia puede quedar
-      // sin hotel seleccionado (ni al inicio, en medio o al final) y, en conjunto,
-      // deben cubrir exactamente todo el rango del destino, sin huecos.
+      // Un destino con al menos una noche requiere hotel, se haya tocado o no la
+      // sección — y si ya se está cobrando hotel, ninguna estancia puede quedar
+      // sin seleccionar (ni al inicio, en medio o al final). En conjunto deben
+      // cubrir exactamente todo el rango del destino, sin huecos.
+      const requiereHotel = nightsBetween(d.fecha_inicio, d.fecha_fin) > 0;
       const algunHotelUsado = d.hoteles.some((h) => h.monto > 0);
-      if (algunHotelUsado) {
+      if (requiereHotel || algunHotelUsado) {
         const fmtFecha = (iso: string) => format(parseISO(iso), "dd/MM/yyyy");
         for (let hi = 0; hi < d.hoteles.length; hi++) {
           if (!(d.hoteles[hi].monto > 0)) {
             return showErrorDialog(
-              `Falta seleccionar el hotel de la estancia ${hi + 1} en el destino ${i + 1}, o elimina esa fila si no la vas a usar.`,
+              requiereHotel && !algunHotelUsado
+                ? `Selecciona un hotel para el destino ${i + 1} (el viaje incluye noche(s) de hospedaje).`
+                : `Falta seleccionar el hotel de la estancia ${hi + 1} en el destino ${i + 1}, o elimina esa fila si no la vas a usar.`,
             );
           }
         }
