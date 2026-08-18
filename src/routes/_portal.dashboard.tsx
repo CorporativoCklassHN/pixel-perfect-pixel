@@ -40,9 +40,9 @@ function seqColor(ratio: number) {
   return `oklch(${l.toFixed(3)} ${c.toFixed(3)} 27.5)`;
 }
 
-function MonthlyPillChart({ data }: { data: { mes: string; total: number }[] }) {
+function MonthlyChart({ data }: { data: { mes: string; total: number }[] }) {
   const max = Math.max(1, ...data.map((d) => d.total));
-  const trackHeight = 168;
+  const chartHeight = 168;
 
   if (data.length === 0) {
     return (
@@ -53,30 +53,21 @@ function MonthlyPillChart({ data }: { data: { mes: string; total: number }[] }) 
   }
 
   return (
-    <div className="flex h-full items-end justify-center gap-4 px-2 pb-1 pt-8 sm:gap-6">
+    <div className="flex h-full items-end justify-center gap-5 px-2 pb-1 pt-8 sm:gap-8">
       {data.map((d) => {
         const ratio = d.total / max;
-        const fillHeight = Math.max(10, ratio * trackHeight);
+        const height = Math.max(24, ratio * chartHeight);
         const color = seqColor(ratio);
         return (
           <div key={d.mes} className="flex flex-col items-center">
             <div className="mb-1 whitespace-nowrap text-xs font-semibold">{fmtMoney(d.total)}</div>
             <div
-              className="relative w-7 cursor-pointer rounded-full outline-none transition-transform hover:scale-105 focus-visible:scale-105"
-              style={{ height: trackHeight, background: "var(--color-primary-soft)" }}
+              className="w-16 cursor-pointer outline-none transition-transform hover:scale-105 focus-visible:scale-105"
+              style={{ height, background: color, clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)" }}
               tabIndex={0}
               role="img"
               aria-label={`${d.mes}: ${fmtMoney(d.total)}`}
-            >
-              <div
-                className="absolute inset-x-0 bottom-0 rounded-full"
-                style={{ height: fillHeight, background: color }}
-              />
-              <div
-                className="absolute left-1/2 h-4 w-4 -translate-x-1/2 rounded-full"
-                style={{ bottom: fillHeight - 8, background: color, boxShadow: "0 0 0 3px var(--color-card)" }}
-              />
-            </div>
+            />
             <div className="mt-2 text-[11px] font-medium uppercase text-muted-foreground">{d.mes}</div>
           </div>
         );
@@ -110,14 +101,18 @@ function Dashboard() {
     porComprobar: solicitudes.filter((s) => s.estatus === "Cerrado" && !s.comprobante_viaje).length,
   };
 
-  // chart data: group by month
-  const byMonth: Record<string, number> = {};
+  // chart data: group by month, ordenado cronológicamente (no por orden de aparición)
+  const byMonth: Record<string, { label: string; total: number }> = {};
   for (const s of solicitudes) {
     const d = new Date(s.created_at);
-    const k = d.toLocaleString("es-MX", { month: "short" });
-    byMonth[k] = (byMonth[k] || 0) + s.monto_total;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const label = d.toLocaleString("es-MX", { month: "short" });
+    if (!byMonth[key]) byMonth[key] = { label, total: 0 };
+    byMonth[key].total += s.monto_total;
   }
-  const chart = Object.entries(byMonth).map(([m, v]) => ({ mes: m, total: v }));
+  const chart = Object.entries(byMonth)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, v]) => ({ mes: v.label, total: v.total }));
 
   const recientes = [...solicitudes].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 5);
   const userName = (id: string) => users.find((u) => u.id === id)?.nombre ?? "—";
@@ -141,7 +136,7 @@ function Dashboard() {
             </div>
           </div>
           <div className="h-64">
-            <MonthlyPillChart data={chart} />
+            <MonthlyChart data={chart} />
           </div>
         </div>
         <div className="ckl-card p-4">
