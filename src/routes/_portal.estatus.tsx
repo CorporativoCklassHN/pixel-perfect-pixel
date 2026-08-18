@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Search, MessageSquareWarning, Upload, Check, X, Edit2 } from "lucide-react";
+import { Search, MessageSquareWarning, Upload, Check, X, Edit2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useLocalStorage } from "@/lib/auth";
@@ -23,7 +23,7 @@ export const Route = createFileRoute("/_portal/estatus")({
 });
 
 function Estatus() {
-  const { user, role } = useAuth();
+  const { user, role, hasPerm } = useAuth();
   const nav = useNavigate();
   const [solicitudes, setSolicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
   const [autorizaciones, setAutorizaciones] = useLocalStorage<Autorizacion[]>(KEYS.autorizaciones, []);
@@ -54,7 +54,11 @@ function Estatus() {
   const canAuth = (s: Solicitud) => {
     if (!role) return false;
     if (s.estatus !== "Abierto") return false;
-    if (role.permisos.autorizar_lte5000 && s.monto_total <= umbral && s.jefe_status === "Pendiente") return "jefe";
+    // El paso de Jefe siempre lo puede dar quien tenga el permiso, sin importar el
+    // monto: el umbral solo decide si además se necesita un segundo visto bueno de
+    // Finanzas, no si el propio Jefe puede autorizar. Antes exigir monto ≤ umbral
+    // aquí dejaba las solicitudes de monto alto sin nadie que pudiera autorizarlas.
+    if (role.permisos.autorizar_lte5000 && s.jefe_status === "Pendiente") return "jefe";
     if (role.permisos.autorizar_gt5000 && s.monto_total > umbral && s.jefe_status === "Autorizado" && s.finanzas_status === "Pendiente") return "finanzas";
     return false;
   };
@@ -109,6 +113,26 @@ function Estatus() {
     if (!confirm(`¿Eliminar solicitud ${s.folio}?`)) return;
     setSolicitudes(solicitudes.filter((x) => x.id !== s.id));
     toast.success("Solicitud eliminada.");
+  };
+
+  // Herramienta de corrección para administradores: borra las autorizaciones/
+  // rechazos ya registrados y regresa la solicitud a Abierto/Pendiente, por si
+  // se autorizó o rechazó por error (p. ej. un rol con permisos de más de un
+  // nivel resolvió el paso equivocado).
+  const revertir = (s: Solicitud) => {
+    if (!confirm(`¿Revertir las autorizaciones de la solicitud ${s.folio} y regresarla a Abierto/Pendiente?`)) return;
+    setAutorizaciones(autorizaciones.filter((a) => a.solicitud_id !== s.id));
+    setSolicitudes(solicitudes.map((x) => (x.id === s.id
+      ? {
+          ...x,
+          estatus: "Abierto",
+          jefe_status: "Pendiente",
+          finanzas_status: x.finanzas_status === "N/A" ? "N/A" : "Pendiente",
+          nota_rechazo: undefined,
+        }
+      : x)));
+    toast.success(`Solicitud ${s.folio} revertida a Abierto/Pendiente.`);
+    setDetail(null);
   };
 
   return (
@@ -224,6 +248,11 @@ function Estatus() {
                 <button onClick={() => setRejecting(detail)} className="ckl-btn-outline"><X size={14} /> Rechazar</button>
                 <button onClick={() => authorize(detail)} className="ckl-btn-primary"><Check size={14} /> Autorizar</button>
               </>
+            )}
+            {hasPerm("configurar_permisos") && autorizaciones.some((a) => a.solicitud_id === detail.id) && (
+              <button onClick={() => revertir(detail)} className="ckl-btn-outline">
+                <RotateCcw size={14} /> Revertir autorización
+              </button>
             )}
           </div>
         </Modal>
