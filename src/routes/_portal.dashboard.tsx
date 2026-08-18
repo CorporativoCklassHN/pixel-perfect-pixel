@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Clock, CheckCircle2, AlertTriangle, ClockArrowDown, FileText, Download } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
 import { useAuth } from "@/lib/auth";
 import {
   KEYS,
@@ -29,6 +28,59 @@ function Kpi({ icon: Icon, label, value, color, bg, hint }: any) {
         <div className="mt-1 text-[10.5px] text-muted-foreground">{label}</div>
         {hint && <div className="mt-0.5 text-[10px]" style={{ color }}>{hint}</div>}
       </div>
+    </div>
+  );
+}
+
+// Rampa secuencial de un solo tono (el rojo de marca): más claro = monto menor,
+// más saturado/oscuro = monto mayor. Mismo hue/chroma que --primary (27.5).
+function seqColor(ratio: number) {
+  const l = 0.88 - ratio * 0.43;
+  const c = 0.03 + ratio * 0.19;
+  return `oklch(${l.toFixed(3)} ${c.toFixed(3)} 27.5)`;
+}
+
+function MonthlyPillChart({ data }: { data: { mes: string; total: number }[] }) {
+  const max = Math.max(1, ...data.map((d) => d.total));
+  const trackHeight = 168;
+
+  if (data.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+        Sin datos para mostrar.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full items-end justify-center gap-4 px-2 pb-1 pt-8 sm:gap-6">
+      {data.map((d) => {
+        const ratio = d.total / max;
+        const fillHeight = Math.max(10, ratio * trackHeight);
+        const color = seqColor(ratio);
+        return (
+          <div key={d.mes} className="flex flex-col items-center">
+            <div className="mb-1 whitespace-nowrap text-xs font-semibold">{fmtMoney(d.total)}</div>
+            <div
+              className="relative w-7 cursor-pointer rounded-full outline-none transition-transform hover:scale-105 focus-visible:scale-105"
+              style={{ height: trackHeight, background: "var(--color-primary-soft)" }}
+              tabIndex={0}
+              role="img"
+              aria-label={`${d.mes}: ${fmtMoney(d.total)}`}
+            >
+              <div
+                className="absolute inset-x-0 bottom-0 rounded-full"
+                style={{ height: fillHeight, background: color }}
+              />
+              <div
+                className="absolute left-1/2 h-4 w-4 -translate-x-1/2 rounded-full"
+                style={{ bottom: fillHeight - 8, background: color, boxShadow: "0 0 0 3px var(--color-card)" }}
+              />
+            </div>
+            <div className="mt-2 text-[11px] font-medium uppercase text-muted-foreground">{d.mes}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -89,15 +141,7 @@ function Dashboard() {
             </div>
           </div>
           <div className="h-64">
-            <ResponsiveContainer>
-              <BarChart data={chart}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E9ECEF" />
-                <XAxis dataKey="mes" stroke="#666" fontSize={11} />
-                <YAxis stroke="#666" fontSize={11} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
-                <Tooltip formatter={(v: number) => fmtMoney(v)} />
-                <Bar dataKey="total" fill="#E30613" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <MonthlyPillChart data={chart} />
           </div>
         </div>
         <div className="ckl-card p-4">
