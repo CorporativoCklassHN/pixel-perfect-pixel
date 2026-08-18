@@ -200,36 +200,32 @@ function Solicitar() {
           return showErrorDialog(`Las fechas del hotel ${hi + 1} se empalman con el hotel ${hi} (destino ${i + 1}).`);
         }
       }
-      // Si se está cobrando hotel en este destino, las estancias deben cubrir
-      // exactamente todo el rango del destino, sin huecos entre ellas.
-      const usedIdx = d.hoteles.map((h, idx) => (h.monto > 0 ? idx : -1)).filter((idx) => idx !== -1);
-      if (usedIdx.length > 0) {
+      // Si se está cobrando hotel en este destino, ninguna estancia puede quedar
+      // sin hotel seleccionado (ni al inicio, en medio o al final) y, en conjunto,
+      // deben cubrir exactamente todo el rango del destino, sin huecos.
+      const algunHotelUsado = d.hoteles.some((h) => h.monto > 0);
+      if (algunHotelUsado) {
         const fmtFecha = (iso: string) => format(parseISO(iso), "dd/MM/yyyy");
-        const first = usedIdx[0];
-        const last = usedIdx[usedIdx.length - 1];
-        // Un hotel sin seleccionar entre dos que sí tienen monto es casi
-        // seguro un olvido del usuario, no un renglón sobrante al final.
-        for (let hi = first; hi <= last; hi++) {
+        for (let hi = 0; hi < d.hoteles.length; hi++) {
           if (!(d.hoteles[hi].monto > 0)) {
             return showErrorDialog(
-              `Falta seleccionar el hotel de la estancia ${hi + 1} en el destino ${i + 1} (o elimínala si no aplica).`,
+              `Falta seleccionar el hotel de la estancia ${hi + 1} en el destino ${i + 1}, o elimina esa fila si no la vas a usar.`,
             );
           }
         }
-        const hotelesUsados = d.hoteles.slice(first, last + 1);
-        if (hotelesUsados[0].fecha_inicio !== d.fecha_inicio) {
+        if (d.hoteles[0].fecha_inicio !== d.fecha_inicio) {
           return showErrorDialog(
             `El primer hotel del destino ${i + 1} debe iniciar el ${fmtFecha(d.fecha_inicio)} (inicio del destino).`,
           );
         }
-        for (let k = 1; k < hotelesUsados.length; k++) {
-          if (hotelesUsados[k].fecha_inicio !== hotelesUsados[k - 1].fecha_fin) {
+        for (let k = 1; k < d.hoteles.length; k++) {
+          if (d.hoteles[k].fecha_inicio !== d.hoteles[k - 1].fecha_fin) {
             return showErrorDialog(
               `Hay un hueco entre las fechas de los hoteles del destino ${i + 1}. Cúbrelo o ajusta las fechas.`,
             );
           }
         }
-        const ultimoHotel = hotelesUsados[hotelesUsados.length - 1];
+        const ultimoHotel = d.hoteles[d.hoteles.length - 1];
         if (ultimoHotel.fecha_fin !== d.fecha_fin) {
           return showErrorDialog(
             `El último hotel del destino ${i + 1} debe terminar el ${fmtFecha(d.fecha_fin)} (fin del destino).`,
