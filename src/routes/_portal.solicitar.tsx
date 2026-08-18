@@ -202,9 +202,21 @@ function Solicitar() {
       }
       // Si se está cobrando hotel en este destino, las estancias deben cubrir
       // exactamente todo el rango del destino, sin huecos entre ellas.
-      const hotelesUsados = d.hoteles.filter((h) => h.monto > 0);
-      if (hotelesUsados.length > 0) {
+      const usedIdx = d.hoteles.map((h, idx) => (h.monto > 0 ? idx : -1)).filter((idx) => idx !== -1);
+      if (usedIdx.length > 0) {
         const fmtFecha = (iso: string) => format(parseISO(iso), "dd/MM/yyyy");
+        const first = usedIdx[0];
+        const last = usedIdx[usedIdx.length - 1];
+        // Un hotel sin seleccionar entre dos que sí tienen monto es casi
+        // seguro un olvido del usuario, no un renglón sobrante al final.
+        for (let hi = first; hi <= last; hi++) {
+          if (!(d.hoteles[hi].monto > 0)) {
+            return showErrorDialog(
+              `Falta seleccionar el hotel de la estancia ${hi + 1} en el destino ${i + 1} (o elimínala si no aplica).`,
+            );
+          }
+        }
+        const hotelesUsados = d.hoteles.slice(first, last + 1);
         if (hotelesUsados[0].fecha_inicio !== d.fecha_inicio) {
           return showErrorDialog(
             `El primer hotel del destino ${i + 1} debe iniciar el ${fmtFecha(d.fecha_inicio)} (inicio del destino).`,
@@ -467,12 +479,13 @@ function DateField({
   disabled?: boolean;
   className?: string;
 }) {
+  const [open, setOpen] = useState(false);
   const selected = value ? parseISO(value) : undefined;
   const minDate = min ? parseISO(min) : undefined;
   const maxDate = max ? parseISO(max) : undefined;
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -491,7 +504,11 @@ function DateField({
           locale={es}
           selected={selected}
           defaultMonth={selected ?? minDate ?? maxDate}
-          onSelect={(d) => d && onChange(format(d, "yyyy-MM-dd"))}
+          onSelect={(d) => {
+            if (!d) return;
+            onChange(format(d, "yyyy-MM-dd"));
+            setOpen(false);
+          }}
           disabled={(d) => (minDate ? d < minDate : false) || (maxDate ? d > maxDate : false)}
         />
       </PopoverContent>
