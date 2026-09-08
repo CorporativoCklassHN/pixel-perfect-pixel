@@ -37,6 +37,8 @@ export function PortalLayout() {
   ];
 
   const filtered = items.filter((i) => {
+    // El rol Administrador no solicita ni comprueba sus propios viáticos.
+    if (role.nombre === "administrador" && (i.to === "/solicitar" || i.to === "/comprobacion")) return false;
     if (i.to === "/usuarios") return role.permisos.ver_todo || role.permisos.ver_equipo;
     if (!i.perm) return true;
     return role.permisos[i.perm];
@@ -97,9 +99,6 @@ export function PortalLayout() {
           <div className="truncate text-xs font-semibold">{user.nombre}</div>
           <div className="truncate text-[10px] text-muted-foreground">{role.nombre}</div>
         </div>
-        <button onClick={() => { logout(); nav({ to: "/login" }); }} className="rounded p-1.5 hover:bg-secondary" title="Salir">
-          <LogOut size={15} />
-        </button>
       </div>
     </aside>
   );
@@ -120,10 +119,17 @@ export function PortalLayout() {
             <div className="text-[11px] text-muted-foreground">Portal &nbsp;/&nbsp; {current?.section ?? "—"}</div>
             <div className="text-sm font-semibold">{current?.label ?? "Inicio"}</div>
           </div>
+          <button
+            onClick={() => { logout(); nav({ to: "/login" }); }}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold hover:bg-secondary"
+            style={{ color: "var(--color-primary)" }}
+          >
+            <LogOut size={15} /> Cerrar sesión
+          </button>
           <button className="rounded-md p-2 hover:bg-secondary" title="Notificaciones">
             <Bell size={18} />
           </button>
-          {role.permisos.solicitar && (
+          {role.permisos.solicitar && role.nombre !== "administrador" && (
             <Link to="/solicitar" className="ckl-btn-primary">
               <Plus size={15} /> Nueva solicitud
             </Link>

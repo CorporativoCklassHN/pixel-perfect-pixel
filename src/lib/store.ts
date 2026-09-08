@@ -71,6 +71,14 @@ export type Autorizacion = {
   nota: string;
 };
 
+// Un solo dispositivo/pestaña por usuario: se guarda el token de la sesión más
+// reciente para esa cuenta; cualquier otra sesión abierta con el mismo usuario
+// detecta el cambio y se cierra sola (ver AuthProvider).
+export type SessionInfo = {
+  userId: string;
+  token: string;
+};
+
 export type ResetCode = {
   id: string;
   user_id: string;
@@ -123,6 +131,7 @@ export const KEYS = {
   hoteles: "ckl_hoteles",
   origenes: "ckl_origenes",
   resetCodes: "ckl_reset_codes",
+  session: "ckl_session",
 } as const;
 
 // ───────── SEED DATA ─────────
@@ -201,7 +210,7 @@ const SEED_USERS: User[] = [
   { id: "u2", nombre: "Juan Alvarado", correo: "jefe@cklass.com", password: "Jefe123!", rfc: "ALAJ750505CD2", rol_id: 2, empresa: "INTERMEDIARIA INTERMEX", jefe_id: "u1", activo: true, initials: "JA" },
   { id: "u3", nombre: "María Torres", correo: "usuario@cklass.com", password: "User123!", rfc: "TOMM900312EF3", rol_id: 1, empresa: "WATA GROUP", jefe_id: "u2", activo: true, initials: "MT" },
   { id: "u4", nombre: "Luis Vega", correo: "finanzas@cklass.com", password: "Fin123!", rfc: "VEGAL850620GH4", rol_id: 4, empresa: "WATA GROUP", jefe_id: "u1", activo: true, initials: "LV" },
-  { id: "u5", nombre: "Patricia Luna", correo: "gestor@cklass.com", password: "Gest123!", rfc: "LUMP920718IJ5", rol_id: 3, empresa: "INTERMEDIARIA INTERMEX", jefe_id: "u1", activo: false, initials: "PL" },
+  { id: "u5", nombre: "Patricia Luna", correo: "gestor@cklass.com", password: "Gest123!", rfc: "LUMP920718IJ5", rol_id: 3, empresa: "INTERMEDIARIA INTERMEX", jefe_id: "u1", activo: true, initials: "PL" },
   { id: "u6", nombre: "Diego Ramírez", correo: "compras@cklass.com", password: "Compras123!", rfc: "RADI870415KL7", rol_id: 6, empresa: "WATA GROUP", jefe_id: "u1", activo: true, initials: "DR" },
 ];
 
@@ -251,6 +260,11 @@ const SEED_SOLICITUDES: Solicitud[] = [
   { id: "s4", folio: "#0038", user_id: "u2", fecha: "25/04/2026", empresa: "INTERMEDIARIA INTERMEX", origen: "Guadalajara", destino_resumen: "GDL - Zacatecas", tipo_viaje: "Capacitación", motivo: "Capacitación equipo de ventas regional", personas_count: 3, personas_nombres: "J. Alvarado, P. Salas, R. Mora", monto_total: 10000, jefe_status: "Autorizado", finanzas_status: "Autorizado", estatus: "Cerrado", comprobante_viaje: "29/04/2026", created_at: "2026-04-25" },
   { id: "s5", folio: "#0037", user_id: "u3", fecha: "10/04/2026", empresa: "WATA GROUP", origen: "Guadalajara", destino_resumen: "GDL - Monterrey", tipo_viaje: "Comercial", motivo: "Reunión con clientes clave zona norte", personas_count: 2, personas_nombres: "M. Torres, C. Ibarra", monto_total: 4800, jefe_status: "Pendiente", finanzas_status: "N/A", estatus: "Abierto", comprobante_viaje: null, created_at: "2026-04-10" },
   { id: "s6", folio: "#0036", user_id: "u4", fecha: "01/04/2026", empresa: "WATA GROUP", origen: "Guadalajara", destino_resumen: "GDL - Querétaro", tipo_viaje: "Auditoría", motivo: "Cierre de auditoría fiscal anual", personas_count: 1, personas_nombres: "L. Vega", monto_total: 3100, jefe_status: "Autorizado", finanzas_status: "N/A", estatus: "Cerrado", comprobante_viaje: "05/04/2026", created_at: "2026-04-01" },
+  { id: "s7", folio: "#0042", user_id: "u3", fecha: "20/08/2026", empresa: "WATA GROUP", origen: "Guadalajara", destino_resumen: "GDL - Monterrey", tipo_viaje: "Comercial", motivo: "Reunión con distribuidores zona norte", personas_count: 1, personas_nombres: "M. Torres", monto_total: 7200, jefe_status: "Pendiente", finanzas_status: "Pendiente", estatus: "Abierto", comprobante_viaje: null, created_at: "2026-08-20" },
+  { id: "s8", folio: "#0043", user_id: "u2", fecha: "25/08/2026", empresa: "INTERMEDIARIA INTERMEX", origen: "Guadalajara", destino_resumen: "GDL - Colima", tipo_viaje: "Visita a tiendas", motivo: "Supervisión de apertura de tienda nueva", personas_count: 1, personas_nombres: "J. Alvarado", monto_total: 3200, jefe_status: "Pendiente", finanzas_status: "N/A", estatus: "Abierto", comprobante_viaje: null, created_at: "2026-08-25" },
+  { id: "s9", folio: "#0044", user_id: "u6", fecha: "28/08/2026", empresa: "WATA GROUP", origen: "Guadalajara", destino_resumen: "GDL - CDMX", tipo_viaje: "Visita a proveedores", motivo: "Negociación con proveedor nuevo", personas_count: 1, personas_nombres: "D. Ramírez", monto_total: 6100, jefe_status: "Pendiente", finanzas_status: "Pendiente", estatus: "Abierto", comprobante_viaje: null, created_at: "2026-08-28" },
+  { id: "s10", folio: "#0045", user_id: "u3", fecha: "01/09/2026", empresa: "WATA GROUP", origen: "Guadalajara", destino_resumen: "GDL - Querétaro", tipo_viaje: "Capacitación", motivo: "Capacitación de equipo comercial", personas_count: 1, personas_nombres: "M. Torres", monto_total: 4500, jefe_status: "Autorizado", finanzas_status: "N/A", estatus: "Cerrado", comprobante_viaje: null, created_at: "2026-09-01" },
+  { id: "s11", folio: "#0046", user_id: "u3", fecha: "03/09/2026", empresa: "WATA GROUP", origen: "Guadalajara", destino_resumen: "GDL - Colima", tipo_viaje: "Comercial", motivo: "Visita a cliente potencial", personas_count: 1, personas_nombres: "M. Torres", monto_total: 2100, jefe_status: "Rechazado", finanzas_status: "N/A", estatus: "Rechazado", comprobante_viaje: null, nota_rechazo: "Motivo de viaje insuficientemente justificado.", created_at: "2026-09-03" },
 ];
 
 const SEED_AUTORIZACIONES: Autorizacion[] = [
@@ -261,6 +275,8 @@ const SEED_AUTORIZACIONES: Autorizacion[] = [
   { id: "a5", solicitud_id: "s4", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-04-26", nota: "" },
   { id: "a6", solicitud_id: "s4", rol_autorizador: "finanzas", user_id: "u4", status: "autorizado", fecha: "2026-04-27", nota: "" },
   { id: "a7", solicitud_id: "s6", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-04-02", nota: "" },
+  { id: "a8", solicitud_id: "s10", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-09-02", nota: "" },
+  { id: "a9", solicitud_id: "s11", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "rechazado", fecha: "2026-09-04", nota: "Motivo de viaje insuficientemente justificado." },
 ];
 
 const SEED_COMPROBANTES: ComprobanteGasto[] = [
@@ -269,6 +285,11 @@ const SEED_COMPROBANTES: ComprobanteGasto[] = [
   { id: "cg3", solicitud_id: "s2", concepto: "Transporte local", monto_solicitado: 400, monto_comprobado: 200, status_renglon: "parcialmente_comprobado" },
   { id: "cg4", solicitud_id: "s2", concepto: "Comida", monto_solicitado: 900, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cg5", solicitud_id: "s2", concepto: "Otros", monto_solicitado: 500, monto_comprobado: 500, status_renglon: "comprobado" },
+  { id: "cg6", solicitud_id: "s10", concepto: "Hotel", monto_solicitado: 1600, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cg7", solicitud_id: "s10", concepto: "Transporte foráneo", monto_solicitado: 1400, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cg8", solicitud_id: "s10", concepto: "Transporte local", monto_solicitado: 300, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cg9", solicitud_id: "s10", concepto: "Comida", monto_solicitado: 900, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cg10", solicitud_id: "s10", concepto: "Otros", monto_solicitado: 300, monto_comprobado: 0, status_renglon: "pendiente" },
 ];
 
 const SEED_CONFIG = {
@@ -306,6 +327,7 @@ export function initSeed() {
     }
   }
   backfillComprasCorporativas();
+  backfillDemoBatch2026_09();
 }
 
 // Los navegadores que ya tenían ckl_roles/ckl_users guardados antes de que
@@ -332,6 +354,40 @@ function backfillComprasCorporativas() {
         empresa: "WATA GROUP", jefe_id: admin?.id ?? null, activo: true, initials: "DR",
       },
     ]);
+  }
+}
+
+// Solicitudes de ejemplo agregadas después de que los primeros folios (s1–s6)
+// ya se comprobaron/cerraron en pruebas — sin este backfill, un navegador que
+// ya tenía datos sembrados nunca las recibe (initSeed solo siembra si la key
+// está vacía). También reactiva a Patricia Luna (gestor de vuelos), que en el
+// seed original estaba inactiva.
+function backfillDemoBatch2026_09() {
+  const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
+  const idsNuevos = ["s7", "s8", "s9", "s10", "s11"];
+  const faltantes = SEED_SOLICITUDES.filter(
+    (s) => idsNuevos.includes(s.id) && !solicitudes.some((x) => x.id === s.id),
+  );
+  if (faltantes.length) {
+    lsSet(KEYS.solicitudes, [...faltantes, ...solicitudes]);
+
+    const autorizaciones = lsGet<Autorizacion[]>(KEYS.autorizaciones, []);
+    const autNuevas = SEED_AUTORIZACIONES.filter(
+      (a) => ["a8", "a9"].includes(a.id) && !autorizaciones.some((x) => x.id === a.id),
+    );
+    if (autNuevas.length) lsSet(KEYS.autorizaciones, [...autorizaciones, ...autNuevas]);
+
+    const comprobantes = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+    const cgNuevos = SEED_COMPROBANTES.filter(
+      (c) => c.solicitud_id === "s10" && !comprobantes.some((x) => x.id === c.id),
+    );
+    if (cgNuevos.length) lsSet(KEYS.comprobantesGasto, [...comprobantes, ...cgNuevos]);
+  }
+
+  const users = lsGet<User[]>(KEYS.users, []);
+  const gestor = users.find((u) => u.correo === "gestor@cklass.com");
+  if (gestor && !gestor.activo) {
+    lsSet(KEYS.users, users.map((u) => (u.id === gestor.id ? { ...u, activo: true } : u)));
   }
 }
 

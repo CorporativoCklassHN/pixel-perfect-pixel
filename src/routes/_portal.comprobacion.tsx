@@ -2,9 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Upload, FileText, FileCode, Edit2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth, useLocalStorage } from "@/lib/auth";
+import { useLocalStorage } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
-import { KEYS, fmtMoney, uid, type Solicitud, type ComprobanteGasto } from "@/lib/store";
+import { KEYS, fmtMoney, uid, type Solicitud, type ComprobanteGasto, type Sociedad } from "@/lib/store";
 
 export const Route = createFileRoute("/_portal/comprobacion")({
   head: () => ({ meta: [{ title: "Comprobación — CKL" }] }),
@@ -27,13 +27,17 @@ type Factura = {
 };
 
 function Comprobacion() {
-  const { user } = useAuth();
   const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
+  const [sociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
   const [comprobantes, setComprobantes] = useLocalStorage<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
   const [facturas, setFacturas] = useLocalStorage<Factura[]>(KEYS.facturasXml, []);
   const cerradas = solicitudes.filter((s) => s.estatus === "Cerrado");
   const [sid, setSid] = useState<string>(cerradas[0]?.id ?? "");
   const sel = solicitudes.find((s) => s.id === sid);
+  // Cada usuario factura a la Sociedad (razón social) con la que solicitó el
+  // viático, no a su propio RFC personal — el Receptor del CFDI debe ser esa
+  // sociedad.
+  const solSociedad = sociedades.find((so) => so.nombre === sel?.empresa);
   const rows = useMemo(() => comprobantes.filter((c) => c.solicitud_id === sid), [comprobantes, sid]);
   const fs = useMemo(() => facturas.filter((f) => f.solicitud_id === sid), [facturas, sid]);
   const [log, setLog] = useState<string[]>([]);
@@ -62,8 +66,9 @@ function Comprobacion() {
           status = "Error";
         } else {
           const rfcMatch = text.match(/Receptor[^>]*Rfc=["']([^"']+)["']/i);
-          if (rfcMatch && user && rfcMatch[1].toUpperCase() !== user.rfc.toUpperCase()) {
-            addLog(`✖ RFC del Receptor no coincide (esperado: ${user.rfc})`);
+          const rfcEsperado = solSociedad?.rfc;
+          if (rfcMatch && rfcEsperado && rfcMatch[1].toUpperCase() !== rfcEsperado.toUpperCase()) {
+            addLog(`✖ RFC del Receptor no coincide (esperado: ${rfcEsperado})`);
             status = "Error";
           } else {
             addLog(`✔ XML verificado CFDI 4.0. UUID: ${uuidv}`);

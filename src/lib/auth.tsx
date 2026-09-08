@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { KEYS, lsGet, lsSet, initSeed, findUserByIdentifier, type Role, type User } from "./store";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { KEYS, lsGet, lsSet, initSeed, findUserByIdentifier, uid, type Role, type User, type SessionInfo } from "./store";
+import { showErrorDialog } from "@/components/ErrorDialog";
 
 type AuthCtx = {
   user: User | null;
@@ -15,6 +16,10 @@ const Ctx = createContext<AuthCtx | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<Role | null>(null);
+  // La sesión (token) que esta pestaña considera "propia". Si en localStorage
+  // aparece un token distinto para el mismo usuario, significa que se inició
+  // sesión en otro lugar con esa misma cuenta y esta pestaña debe cerrarse.
+  const sessionRef = useRef<SessionInfo | null>(null);
 
   const refresh = () => {
     const u = lsGet<User | null>(KEYS.user, null);
@@ -30,7 +35,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     initSeed();
     refresh();
-    const onStorage = () => refresh();
+    // Al montar (recarga de página), adopta la sesión ya guardada como propia.
+    const u = lsGet<User | null>(KEYS.user, null);
+    const sess = lsGet<SessionInfo | null>(KEYS.session, null);
+    if (u && sess && sess.userId === u.id) sessionRef.current = sess;
+
+    const onStorage = () => {
+      const mine = sessionRef.current;
+      if (mine) {
+        const current = lsGet<SessionInfo | null>(KEYS.session, null);
+        if (current && current.userId === mine.userId && current.token !== mine.token) {
+          sessionRef.current = null;
+          window.localStorage.removeItem(KEYS.user);
+          setUser(null);
+          setRole(null);
+          showErrorDialog("Tu sesión se cerró porque este usuario inició sesión en otro lugar.");
+          return;
+        }
+      }
+      refresh();
+    };
     window.addEventListener("ckl:storage", onStorage);
     window.addEventListener("storage", onStorage);
     return () => {
@@ -42,6 +66,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = (identifier: string, password: string): boolean => {
     const u = findUserByIdentifier(identifier);
     if (!u || u.password !== password || !u.activo) return false;
+    // Genera el token ANTES de escribirlo: lsSet dispara el evento ckl:storage de
+    // forma síncrona incluso en esta misma pestaña, así que la ref ya debe
+    // coincidir para no auto-cerrar la sesión que se acaba de abrir.
+    const session: SessionInfo = { userId: u.id, token: uid("sess_") };
+    sessionRef.current = session;
+    lsSet(KEYS.session, session);
     lsSet(KEYS.user, u);
     refresh();
     return true;
@@ -50,8 +80,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(KEYS.user);
+      window.localStorage.removeItem(KEYS.session);
       window.dispatchEvent(new CustomEvent("ckl:storage", { detail: { key: KEYS.user } }));
     }
+    sessionRef.current = null;
     setUser(null);
     setRole(null);
   };
