@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Clock, CheckCircle2, AlertTriangle, ClockArrowDown, FileText, Download } from "lucide-react";
+import { Clock, CheckCircle2, AlertTriangle, FileText, Download, ChevronRight } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import {
   KEYS,
@@ -17,16 +17,31 @@ export const Route = createFileRoute("/_portal/dashboard")({
   component: Dashboard,
 });
 
-function Kpi({ icon: Icon, label, value, color, bg, hint }: any) {
+type KpiProps = {
+  icon: React.ComponentType<{ size?: number }>;
+  label: string;
+  value: number;
+  color: string;
+  bg: string;
+};
+
+function Kpi({ icon: Icon, label, value, color, bg }: KpiProps) {
   return (
-    <div className="ckl-card flex items-center gap-3 px-3.5 py-3">
-      <div className="flex h-10 w-10 items-center justify-center rounded-md" style={{ background: bg, color }}>
+    <div
+      className="flex flex-col items-center justify-center gap-2 rounded-3xl px-4 py-7 text-center"
+      style={{ background: bg }}
+    >
+      <div
+        className="flex h-11 w-11 items-center justify-center rounded-full border-2"
+        style={{ borderColor: color, color }}
+      >
         <Icon size={20} />
       </div>
-      <div className="min-w-0">
-        <div className="text-[22px] font-bold leading-none">{value}</div>
-        <div className="mt-1 text-[10.5px] text-muted-foreground">{label}</div>
-        {hint && <div className="mt-0.5 text-[10px]" style={{ color }}>{hint}</div>}
+      <div className="text-3xl font-bold leading-none" style={{ color }}>
+        {value}
+      </div>
+      <div className="text-[13px] font-medium" style={{ color }}>
+        {label}
       </div>
     </div>
   );
@@ -40,10 +55,21 @@ function seqColor(ratio: number) {
   return `oklch(${l.toFixed(3)} ${c.toFixed(3)} 27.5)`;
 }
 
-function MonthlyChart({ data }: { data: { mes: string; total: number }[] }) {
-  const max = Math.max(1, ...data.map((d) => d.total));
-  const chartHeight = 168;
+// Redondea un paso de eje al múltiplo "bonito" más cercano (1/2/2.5/5/10 × 10^n),
+// el mismo criterio que usan las librerías de charting para elegir gridlines.
+function niceAxisStep(rawStep: number) {
+  if (rawStep <= 0) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  const niceNorm = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10;
+  return niceNorm * mag;
+}
 
+function fmtAxisTick(v: number) {
+  return v === 0 ? "$0" : `$${Math.round(v / 1000)}k`;
+}
+
+function MonthlyChart({ data }: { data: { mes: string; total: number }[] }) {
   if (data.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
@@ -52,26 +78,73 @@ function MonthlyChart({ data }: { data: { mes: string; total: number }[] }) {
     );
   }
 
+  const max = Math.max(1, ...data.map((d) => d.total));
+  const step = niceAxisStep(max / 4);
+  const niceMax = step * 4;
+  const ticks = [4, 3, 2, 1, 0].map((i) => step * i);
+  const barAreaHeight = 170;
+
   return (
-    <div className="flex h-full items-end justify-center gap-5 px-2 pb-1 pt-8 sm:gap-8">
-      {data.map((d) => {
-        const ratio = d.total / max;
-        const height = Math.max(24, ratio * chartHeight);
-        const color = seqColor(ratio);
-        return (
-          <div key={d.mes} className="flex flex-col items-center">
-            <div className="mb-1 whitespace-nowrap text-xs font-semibold">{fmtMoney(d.total)}</div>
+    <div className="flex gap-3 pt-6">
+      <div
+        className="flex shrink-0 flex-col justify-between text-right text-[11px] text-muted-foreground"
+        style={{ height: barAreaHeight }}
+      >
+        {ticks.map((tick, i) => (
+          <div key={i}>{fmtAxisTick(tick)}</div>
+        ))}
+      </div>
+      <div className="relative flex-1">
+        <div
+          className="absolute inset-x-0 top-0 flex flex-col justify-between"
+          style={{ height: barAreaHeight }}
+        >
+          {ticks.map((_, i) => (
+            <div key={i} className="h-px w-full bg-border" />
+          ))}
+        </div>
+        <div
+          className="relative flex items-end justify-around gap-4"
+          style={{ height: barAreaHeight }}
+        >
+          {data.map((d) => {
+            const ratio = d.total / niceMax;
+            const height = Math.max(4, ratio * barAreaHeight);
+            const isMax = d.total === max;
+            const color = isMax ? "var(--color-primary)" : seqColor(0.22);
+            return (
+              <div
+                key={d.mes}
+                className="relative flex h-full flex-1 flex-col items-center justify-end"
+              >
+                <div
+                  className="absolute whitespace-nowrap text-xs font-semibold"
+                  style={{ bottom: height + 6 }}
+                >
+                  {fmtMoney(d.total)}
+                </div>
+                <div
+                  className="w-full max-w-14 outline-none"
+                  style={{ height, background: color, borderRadius: "6px 6px 2px 2px" }}
+                  tabIndex={0}
+                  role="img"
+                  aria-label={`${d.mes}: ${fmtMoney(d.total)}`}
+                />
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex justify-around gap-4">
+          {data.map((d) => (
             <div
-              className="w-16 cursor-pointer outline-none transition-transform hover:scale-105 focus-visible:scale-105"
-              style={{ height, background: color, clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)" }}
-              tabIndex={0}
-              role="img"
-              aria-label={`${d.mes}: ${fmtMoney(d.total)}`}
-            />
-            <div className="mt-2 text-[11px] font-medium uppercase text-muted-foreground">{d.mes}</div>
-          </div>
-        );
-      })}
+              key={d.mes}
+              className="flex-1 text-center text-[11px] font-medium uppercase text-muted-foreground"
+            >
+              {d.mes}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -96,7 +169,12 @@ function Dashboard() {
   const kpis = {
     pendientes: solicitudes.filter((s) => s.jefe_status === "Pendiente").length,
     autorizados: solicitudes.filter((s) => s.estatus === "Cerrado" && inMonth(s.created_at)).length,
-    atrasados: solicitudes.filter((s) => s.estatus === "Cerrado" && s.comprobante_viaje && (Date.now() - new Date(s.created_at).getTime()) / 86400000 > 7).length,
+    atrasados: solicitudes.filter(
+      (s) =>
+        s.estatus === "Cerrado" &&
+        s.comprobante_viaje &&
+        (Date.now() - new Date(s.created_at).getTime()) / 86400000 > 7,
+    ).length,
     enTiempo: solicitudes.filter((s) => s.estatus === "Cerrado" && s.comprobante_viaje).length,
     porComprobar: solicitudes.filter((s) => s.estatus === "Cerrado" && !s.comprobante_viaje).length,
   };
@@ -114,17 +192,68 @@ function Dashboard() {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([, v]) => ({ mes: v.label, total: v.total }));
 
-  const recientes = [...solicitudes].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 5);
+  const recientes = [...solicitudes]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 5);
   const userName = (id: string) => users.find((u) => u.id === id)?.nombre ?? "—";
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Kpi icon={Clock} label="Pendientes por autorizar" value={kpis.pendientes} color="#B45309" bg="#FEF3C7" hint="Requiere acción" />
-        <Kpi icon={CheckCircle2} label="Autorizados del mes" value={kpis.autorizados} color="#2D6A4F" bg="#D8F3DC" hint="↑ este mes" />
-        <Kpi icon={AlertTriangle} label="Comprobación atrasada +7d" value={kpis.atrasados} color="#E30613" bg="#FEE9EA" hint="Crítico" />
-        <Kpi icon={ClockArrowDown} label="Comprobación en tiempo" value={kpis.enTiempo} color="#FFA500" bg="#FFDBBB" />
-        <Kpi icon={FileText} label="Pendientes de comprobar" value={kpis.porComprobar} color="#1D4ED8" bg="#DBEAFE" />
+      {kpis.atrasados > 0 && (
+        <div
+          className="flex flex-col gap-4 rounded-3xl p-5 sm:flex-row sm:items-center sm:justify-between"
+          style={{ background: "#FEE9EA" }}
+        >
+          <div className="flex items-center gap-4">
+            <div
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white"
+              style={{ background: "var(--color-primary)" }}
+            >
+              <AlertTriangle size={22} />
+            </div>
+            <div>
+              <div className="font-bold">
+                {kpis.atrasados} comprobaci{kpis.atrasados === 1 ? "ón" : "ones"} atrasada
+                {kpis.atrasados === 1 ? "" : "s"} más de 7 días
+              </div>
+              <div className="text-sm" style={{ color: "var(--color-primary-hover)" }}>
+                Requieren atención inmediata antes del cierre contable.
+              </div>
+            </div>
+          </div>
+          <Link
+            to="/estatus"
+            className="shrink-0 rounded-full px-5 py-2.5 text-center text-sm font-semibold text-white"
+            style={{ background: "var(--color-primary)" }}
+          >
+            Ver comprobaciones atrasadas
+          </Link>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-4">
+        <Kpi
+          icon={Clock}
+          label="Por autorizar"
+          value={kpis.pendientes}
+          color="#B45309"
+          bg="#FEF3C7"
+        />
+        <Kpi
+          icon={CheckCircle2}
+          label="Autorizados del mes"
+          value={kpis.autorizados}
+          color="#2D6A4F"
+          bg="#D8F3DC"
+        />
+        <Kpi icon={Clock} label="En tiempo" value={kpis.enTiempo} color="#1D4ED8" bg="#DBEAFE" />
+        <Kpi
+          icon={FileText}
+          label="Por comprobar"
+          value={kpis.porComprobar}
+          color="#525252"
+          bg="#F1F1F1"
+        />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-3">
@@ -139,20 +268,26 @@ function Dashboard() {
             <MonthlyChart data={chart} />
           </div>
         </div>
-        <div className="ckl-card p-4">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold">Cédula Fiscal</div>
-            <button onClick={() => toast.success("PDF descargado.")} className="ckl-btn-ghost"><Download size={14} /> PDF</button>
-          </div>
+        <div className="ckl-card p-5">
+          <div className="text-sm font-semibold">Cédula Fiscal</div>
           {mySoc ? (
-            <dl className="mt-3 space-y-2 text-xs">
-              <Row k="Razón social" v={mySoc.nombre} />
-              <Row k="RFC" v={mySoc.rfc} />
-              <Row k="Régimen" v={mySoc.regimen} />
-              <Row k="CP" v={mySoc.cp} />
-              <Row k="Uso CFDI" v={mySoc.UsoCFDI} />
-              <Row k="Sociedad SAP" v={mySoc.sociedad_sap} />
-            </dl>
+            <>
+              <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+                <Field k="Razón social" v={mySoc.nombre} />
+                <Field k="RFC" v={mySoc.rfc} />
+                <Field k="Régimen" v={mySoc.regimen} />
+                <Field k="CP" v={mySoc.cp} />
+                <Field k="Uso CFDI" v={mySoc.UsoCFDI} />
+                <Field k="Sociedad SAP" v={mySoc.sociedad_sap} />
+              </div>
+              <button
+                onClick={() => toast.success("PDF descargado.")}
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border py-2.5 text-sm font-semibold"
+                style={{ borderColor: "var(--color-primary)", color: "var(--color-primary)" }}
+              >
+                <Download size={15} /> Descargar cédula en PDF
+              </button>
+            </>
           ) : (
             <p className="mt-2 text-xs text-muted-foreground">Sin sociedad asignada.</p>
           )}
@@ -162,7 +297,13 @@ function Dashboard() {
       <div className="ckl-card overflow-hidden">
         <div className="flex items-center justify-between border-b p-4">
           <div className="text-sm font-semibold">Solicitudes recientes</div>
-          <Link to="/estatus" className="text-xs font-semibold" style={{ color: "var(--color-primary)" }}>Ver todas</Link>
+          <Link
+            to="/estatus"
+            className="flex items-center gap-0.5 text-xs font-semibold"
+            style={{ color: "var(--color-primary)" }}
+          >
+            Ver todas <ChevronRight size={14} />
+          </Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -178,7 +319,9 @@ function Dashboard() {
             </thead>
             <tbody>
               {recientes.map((s) => {
-                const ok = s.jefe_status === "Autorizado" && (s.finanzas_status === "Autorizado" || s.finanzas_status === "N/A");
+                const ok =
+                  s.jefe_status === "Autorizado" &&
+                  (s.finanzas_status === "Autorizado" || s.finanzas_status === "N/A");
                 const bad = s.jefe_status === "Rechazado" || s.finanzas_status === "Rechazado";
                 const stripe = bad ? "#E30613" : ok ? "#2D6A4F" : "#CCC";
                 return (
@@ -188,7 +331,9 @@ function Dashboard() {
                     <td className="p-3">{userName(s.user_id)}</td>
                     <td className="p-3 text-xs">{s.destino_resumen}</td>
                     <td className="p-3 text-right font-semibold">{fmtMoney(s.monto_total)}</td>
-                    <td className="p-3"><StatusBadge estatus={s.estatus} /></td>
+                    <td className="p-3">
+                      <StatusBadge estatus={s.estatus} />
+                    </td>
                   </tr>
                 );
               })}
@@ -200,11 +345,11 @@ function Dashboard() {
   );
 }
 
-function Row({ k, v }: { k: string; v: string }) {
+function Field({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex justify-between gap-3 border-b pb-1.5">
-      <dt className="text-muted-foreground">{k}</dt>
-      <dd className="text-right font-medium">{v}</dd>
+    <div>
+      <div className="text-muted-foreground">{k}</div>
+      <div className="font-semibold">{v}</div>
     </div>
   );
 }
@@ -219,5 +364,9 @@ export function StatusBadge({ estatus }: { estatus: string }) {
     "N/A": { bg: "#F1F3F5", color: "#666" },
   };
   const s = m[estatus] ?? m.Pendiente;
-  return <span className="ckl-badge" style={{ background: s.bg, color: s.color }}>{estatus}</span>;
+  return (
+    <span className="ckl-badge" style={{ background: s.bg, color: s.color }}>
+      {estatus}
+    </span>
+  );
 }

@@ -363,18 +363,32 @@ function backfillComprasCorporativas() {
 // está vacía). También reactiva a Patricia Luna (gestor de vuelos), que en el
 // seed original estaba inactiva.
 function backfillDemoBatch2026_09() {
+  const users = lsGet<User[]>(KEYS.users, []);
+  // Los ids "u2"/"u3"/"u6" en SEED_SOLICITUDES asumen un seed fresco; en un
+  // navegador donde Compras Corporativas se creó vía backfillComprasCorporativas
+  // (id aleatorio), hay que remapear al id real por correo o el folio queda
+  // huérfano (se ve "sin asignar" en la tabla de recientes del Dashboard).
+  const idByCorreo = (correo: string) => users.find((u) => u.correo === correo)?.id;
+  const realId: Record<string, string | undefined> = {
+    u2: idByCorreo("jefe@cklass.com"),
+    u3: idByCorreo("usuario@cklass.com"),
+    u6: idByCorreo("compras@cklass.com"),
+  };
+  const remapUserId = (id: string) => realId[id] ?? id;
+
   const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
   const idsNuevos = ["s7", "s8", "s9", "s10", "s11"];
   const faltantes = SEED_SOLICITUDES.filter(
     (s) => idsNuevos.includes(s.id) && !solicitudes.some((x) => x.id === s.id),
-  );
+  ).map((s) => ({ ...s, user_id: remapUserId(s.user_id) }));
+
   if (faltantes.length) {
     lsSet(KEYS.solicitudes, [...faltantes, ...solicitudes]);
 
     const autorizaciones = lsGet<Autorizacion[]>(KEYS.autorizaciones, []);
     const autNuevas = SEED_AUTORIZACIONES.filter(
       (a) => ["a8", "a9"].includes(a.id) && !autorizaciones.some((x) => x.id === a.id),
-    );
+    ).map((a) => ({ ...a, user_id: remapUserId(a.user_id) }));
     if (autNuevas.length) lsSet(KEYS.autorizaciones, [...autorizaciones, ...autNuevas]);
 
     const comprobantes = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
@@ -384,7 +398,26 @@ function backfillDemoBatch2026_09() {
     if (cgNuevos.length) lsSet(KEYS.comprobantesGasto, [...comprobantes, ...cgNuevos]);
   }
 
-  const users = lsGet<User[]>(KEYS.users, []);
+  // Repara folios insertados por una corrida anterior de este backfill (antes del
+  // remapeo de arriba) que quedaron con un user_id huérfano.
+  const seedUserIdById: Record<string, string> = Object.fromEntries(
+    SEED_SOLICITUDES.filter((s) => idsNuevos.includes(s.id)).map((s) => [s.id, s.user_id]),
+  );
+  const current = lsGet<Solicitud[]>(KEYS.solicitudes, []);
+  let repairedAny = false;
+  const repaired = current.map((s) => {
+    const seedUserId = seedUserIdById[s.id];
+    if (!seedUserId) return s;
+    const correctId = remapUserId(seedUserId);
+    const isOrphan = !users.some((u) => u.id === s.user_id);
+    if (correctId && isOrphan && s.user_id !== correctId) {
+      repairedAny = true;
+      return { ...s, user_id: correctId };
+    }
+    return s;
+  });
+  if (repairedAny) lsSet(KEYS.solicitudes, repaired);
+
   const gestor = users.find((u) => u.correo === "gestor@cklass.com");
   if (gestor && !gestor.activo) {
     lsSet(KEYS.users, users.map((u) => (u.id === gestor.id ? { ...u, activo: true } : u)));

@@ -42,8 +42,8 @@
   --color-sidebar-hover: var(--sidebar-hover);
   --color-sidebar-active: var(--sidebar-active);
   --color-sidebar-border: var(--sidebar-border);
-  --font-sans: "Segoe UI", Arial, sans-serif;
-  --font-serif: "Segoe UI", Arial, sans-serif;
+  --font-sans: "Jost", "Segoe UI", Arial, sans-serif;
+  --font-serif: "Jost", "Segoe UI", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
