@@ -113,25 +113,33 @@ export function PortalLayout() {
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center gap-3 border-b bg-white px-4">
-          <button className="lg:hidden" onClick={() => setOpen(true)}><Menu size={20} /></button>
+        <header className="flex h-14 items-center gap-2 border-b bg-white px-3 sm:gap-3 sm:px-4">
+          <button className="shrink-0 lg:hidden" onClick={() => setOpen(true)}>
+            <Menu size={20} />
+          </button>
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] text-muted-foreground">Portal &nbsp;/&nbsp; {current?.section ?? "—"}</div>
-            <div className="text-sm font-semibold">{current?.label ?? "Inicio"}</div>
+            <div className="hidden text-[11px] text-muted-foreground sm:block">
+              Portal &nbsp;/&nbsp; {current?.section ?? "—"}
+            </div>
+            <div className="truncate text-sm font-semibold">{current?.label ?? "Inicio"}</div>
           </div>
           <button
-            onClick={() => { logout(); nav({ to: "/login" }); }}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold hover:bg-secondary"
+            onClick={() => {
+              logout();
+              nav({ to: "/login" });
+            }}
+            className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold hover:bg-secondary"
             style={{ color: "var(--color-primary)" }}
+            title="Cerrar sesión"
           >
-            <LogOut size={15} /> Cerrar sesión
+            <LogOut size={15} /> <span className="hidden sm:inline">Cerrar sesión</span>
           </button>
-          <button className="rounded-md p-2 hover:bg-secondary" title="Notificaciones">
+          <button className="shrink-0 rounded-md p-2 hover:bg-secondary" title="Notificaciones">
             <Bell size={18} />
           </button>
           {role.permisos.solicitar && role.nombre !== "administrador" && (
-            <Link to="/solicitar" className="ckl-btn-primary">
-              <Plus size={15} /> Nueva solicitud
+            <Link to="/solicitar" className="ckl-btn-primary shrink-0" title="Nueva solicitud">
+              <Plus size={15} /> <span className="hidden sm:inline">Nueva solicitud</span>
             </Link>
           )}
         </header>
