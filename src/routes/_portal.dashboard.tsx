@@ -155,6 +155,8 @@ function Dashboard() {
   const sociedades = lsGet<Sociedad[]>(KEYS.sociedades, []);
   const users = lsGet<User[]>(KEYS.users, []);
   const mySoc = sociedades.find((s) => s.nombre === user?.empresa);
+  const config = lsGet<{ dias_comprobacion_atrasada?: number }>(KEYS.config, {});
+  const diasComprobacionAtrasada = config.dias_comprobacion_atrasada ?? 7;
 
   // Usuario: solo sus propias solicitudes. Jefe inmediato: solo las de su equipo.
   // Administrador/Finanzas/Compras corporativas (y roles con "ver todo"): todas.
@@ -173,7 +175,7 @@ function Dashboard() {
       (s) =>
         s.estatus === "Cerrado" &&
         s.comprobante_viaje &&
-        (Date.now() - new Date(s.created_at).getTime()) / 86400000 > 7,
+        (Date.now() - new Date(s.created_at).getTime()) / 86400000 > diasComprobacionAtrasada,
     ).length,
     enTiempo: solicitudes.filter((s) => s.estatus === "Cerrado" && s.comprobante_viaje).length,
     porComprobar: solicitudes.filter((s) => s.estatus === "Cerrado" && !s.comprobante_viaje).length,

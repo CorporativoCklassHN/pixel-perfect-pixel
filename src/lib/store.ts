@@ -297,6 +297,18 @@ const SEED_CONFIG = {
   umbral_finanzas: 5000,
   dia_deposito: "Viernes",
   email_compras: "compras@cklass.com",
+  dias_comprobacion_atrasada: 7,
+  dias_autorizacion_pendiente: 3,
+  dias_recordatorio_viaje: 2,
+  notif_email_activo: true,
+  notif_email_destinatarios: "",
+  smtp_servidor: "",
+  smtp_puerto: 587,
+  smtp_usuario: "",
+  smtp_password: "",
+  smtp_cifrado: "TLS",
+  notif_plataforma_activo: true,
+  revision_automatica_activo: true,
 };
 
 const SEED_ORIGENES = ["Guadalajara", "Ciudad de México", "Monterrey", "León", "Querétaro"];
@@ -328,6 +340,17 @@ export function initSeed() {
   }
   backfillComprasCorporativas();
   backfillDemoBatch2026_09();
+  backfillAutomationsConfig();
+}
+
+// Navegadores que ya tenían ckl_config guardado antes de que existieran los
+// campos de Automatizaciones (umbrales de días, correo, SMTP) no los reciben
+// vía el seed normal (solo se siembra si la key está vacía) — se completan
+// aquí sin tocar los valores que el usuario ya haya configurado.
+function backfillAutomationsConfig() {
+  const config = lsGet<Record<string, unknown>>(KEYS.config, {});
+  const faltaAlguno = Object.keys(SEED_CONFIG).some((k) => !(k in config));
+  if (faltaAlguno) lsSet(KEYS.config, { ...SEED_CONFIG, ...config });
 }
 
 // Los navegadores que ya tenían ckl_roles/ckl_users guardados antes de que
