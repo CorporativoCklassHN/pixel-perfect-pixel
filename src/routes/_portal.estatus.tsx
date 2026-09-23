@@ -13,6 +13,8 @@ import {
   type Solicitud,
   type User,
   type Autorizacion,
+  type Hotel,
+  type ComprobanteGasto,
 } from "@/lib/store";
 import { StatusBadge } from "./_portal.dashboard";
 import { Modal } from "./_portal.solicitar";
@@ -22,12 +24,62 @@ export const Route = createFileRoute("/_portal/estatus")({
   component: Estatus,
 });
 
+// Refleja la forma que guarda "Solicitar viáticos" en KEYS.destinos — no se
+// exporta desde ahí porque es un detalle de esa pantalla, pero Estatus la lee
+// para mostrarle a quien autoriza el desglose completo (hoteles, transportes,
+// otros conceptos) detrás del monto total.
+type HotelStayStored = {
+  id: string;
+  fecha_inicio: string;
+  fecha_fin: string;
+  monto: number;
+  manual: boolean;
+};
+type RowStored = { id: string; tipo: string; monto: number };
+type OtroRowStored = { id: string; concepto: string; monto: number };
+type DestinoStored = {
+  id: string;
+  solicitud_id: string;
+  estado: string;
+  fecha_inicio: string;
+  fecha_fin: string;
+  hoteles: HotelStayStored[];
+  foraneo: RowStored[];
+  local: RowStored[];
+  otros: OtroRowStored[];
+};
+
+function daysBetween(a: string, b: string) {
+  if (!a || !b) return 0;
+  const d1 = new Date(a);
+  const d2 = new Date(b);
+  return Math.max(0, Math.floor((d2.getTime() - d1.getTime()) / 86400000) + 1);
+}
+
+// Noches de hotel = días del rango - 1 (entrada y salida el mismo día no genera noche).
+function nightsBetween(a: string, b: string) {
+  return Math.max(0, daysBetween(a, b) - 1);
+}
+
+// El select de hotel en "Solicitar viáticos" guarda la tarifa (monto), no el id
+// del hotel — se resuelve el nombre buscando en el catálogo un hotel del mismo
+// estado con esa tarifa. Si no hay match (tarifa cambió, monto manual) se
+// muestra una etiqueta genérica en vez de fallar.
+function resolveHotelName(h: HotelStayStored, estado: string, catalogo: Hotel[]) {
+  if (h.manual) return "Monto manual";
+  const match = catalogo.find((ho) => ho.estado === estado && ho.tarifa_base === h.monto);
+  return match?.nombre ?? "Hotel";
+}
+
 function Estatus() {
   const { user, role, hasPerm } = useAuth();
   const nav = useNavigate();
   const [solicitudes, setSolicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
   const [autorizaciones, setAutorizaciones] = useLocalStorage<Autorizacion[]>(KEYS.autorizaciones, []);
   const [users] = useLocalStorage<User[]>(KEYS.users, []);
+  const [destinosAll] = useLocalStorage<DestinoStored[]>(KEYS.destinos, []);
+  const [comprobantesGasto] = useLocalStorage<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  const [hotelesCatalogo] = useLocalStorage<Hotel[]>(KEYS.hoteles, []);
   const config = JSON.parse(typeof window !== "undefined" ? localStorage.getItem(KEYS.config) ?? "{}" : "{}");
   const umbral = config.umbral_finanzas ?? 5000;
 
@@ -46,6 +98,17 @@ function Estatus() {
       return matchQ && matchE;
     });
   }, [solicitudes, q, estado, users, role]);
+
+  // Desglose detallado (hoteles, transportes, otros conceptos) del folio abierto
+  // en el modal, para que quien autoriza vea qué compone el monto total.
+  const destinosDetail = useMemo(
+    () => (detail ? destinosAll.filter((d) => d.solicitud_id === detail.id) : []),
+    [detail, destinosAll],
+  );
+  const resumenMontos = useMemo(
+    () => (detail ? comprobantesGasto.filter((c) => c.solicitud_id === detail.id) : []),
+    [detail, comprobantesGasto],
+  );
 
   const userName = (id: string) => users.find((u) => u.id === id)?.nombre ?? "—";
 
@@ -223,6 +286,97 @@ function Estatus() {
             ))}
           </dl>
           <p className="mt-3 text-xs"><b>Motivo:</b> {detail.motivo}</p>
+
+          {resumenMontos.length > 0 && (
+            <div className="mt-4 border-t pt-3">
+              <div className="text-xs font-semibold">Resumen de montos</div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                {resumenMontos.map((c) => (
+                  <div key={c.id}>
+                    <div className="text-muted-foreground">{c.concepto}</div>
+                    <div className="font-medium">{fmtMoney(c.monto_solicitado)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {destinosDetail.length > 0 && (
+            <div className="mt-4 space-y-3 border-t pt-3">
+              <div className="text-xs font-semibold">Desglose por destino</div>
+              {destinosDetail.map((d, idx) => (
+                <div key={d.id} className="rounded-md border bg-secondary/50 p-3 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className="ckl-badge"
+                      style={{ background: "var(--color-primary)", color: "white" }}
+                    >
+                      Destino {idx + 1}
+                    </span>
+                    <span className="font-medium">{d.estado}</span>
+                    <span className="text-muted-foreground">
+                      {d.fecha_inicio} → {d.fecha_fin}
+                    </span>
+                  </div>
+
+                  {d.hoteles?.length > 0 && (
+                    <div className="mt-2">
+                      <div className="font-semibold text-muted-foreground">Hoteles</div>
+                      {d.hoteles.map((h) => {
+                        const noches = nightsBetween(h.fecha_inicio, h.fecha_fin);
+                        const subtotal = h.manual ? h.monto : noches * h.monto;
+                        return (
+                          <div key={h.id} className="mt-1 flex items-center justify-between gap-2">
+                            <span>
+                              {resolveHotelName(h, d.estado, hotelesCatalogo)} · {h.fecha_inicio} →{" "}
+                              {h.fecha_fin} {h.manual ? "" : `· ${noches} noche(s)`}
+                            </span>
+                            <span className="shrink-0 font-medium">{fmtMoney(subtotal)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {d.foraneo?.length > 0 && (
+                    <div className="mt-2">
+                      <div className="font-semibold text-muted-foreground">Transporte foráneo</div>
+                      {d.foraneo.map((r) => (
+                        <div key={r.id} className="mt-1 flex items-center justify-between gap-2">
+                          <span>{r.tipo}</span>
+                          <span className="font-medium">{fmtMoney(r.monto)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {d.local?.length > 0 && (
+                    <div className="mt-2">
+                      <div className="font-semibold text-muted-foreground">Transporte local</div>
+                      {d.local.map((r) => (
+                        <div key={r.id} className="mt-1 flex items-center justify-between gap-2">
+                          <span>{r.tipo}</span>
+                          <span className="font-medium">{fmtMoney(r.monto)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {d.otros?.length > 0 && (
+                    <div className="mt-2">
+                      <div className="font-semibold text-muted-foreground">Otros conceptos</div>
+                      {d.otros.map((r) => (
+                        <div key={r.id} className="mt-1 flex items-center justify-between gap-2">
+                          <span>{r.concepto || "—"}</span>
+                          <span className="font-medium">{fmtMoney(r.monto)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="mt-5 flex flex-wrap justify-end gap-2">
             {canEdit(detail) && (

@@ -39,7 +39,7 @@ export function PortalLayout() {
   const filtered = items.filter((i) => {
     // El rol Administrador no solicita ni comprueba sus propios viáticos.
     if (role.nombre === "administrador" && (i.to === "/solicitar" || i.to === "/comprobacion")) return false;
-    if (i.to === "/usuarios") return role.permisos.ver_todo || role.permisos.ver_equipo;
+    if (i.to === "/usuarios") return role.permisos.gestionar_usuarios;
     if (!i.perm) return true;
     return role.permisos[i.perm];
   });

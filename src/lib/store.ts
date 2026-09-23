@@ -212,6 +212,11 @@ const SEED_USERS: User[] = [
   { id: "u4", nombre: "Luis Vega", correo: "finanzas@cklass.com", password: "Fin123!", rfc: "VEGAL850620GH4", rol_id: 4, empresa: "WATA GROUP", jefe_id: "u1", activo: true, initials: "LV" },
   { id: "u5", nombre: "Patricia Luna", correo: "gestor@cklass.com", password: "Gest123!", rfc: "LUMP920718IJ5", rol_id: 3, empresa: "INTERMEDIARIA INTERMEX", jefe_id: "u1", activo: true, initials: "PL" },
   { id: "u6", nombre: "Diego Ramírez", correo: "compras@cklass.com", password: "Compras123!", rfc: "RADI870415KL7", rol_id: 6, empresa: "WATA GROUP", jefe_id: "u1", activo: true, initials: "DR" },
+  // Empleados de ejemplo en las otras dos sociedades (WATA GROUP ya cubierta
+  // por María Torres), para poder probar el flujo completo con cada RFC/Cédula
+  // Fiscal distinta.
+  { id: "u7", nombre: "Carlos Mendoza", correo: "usuario2@cklass.com", password: "User223!", rfc: "MECA880215MN8", rol_id: 1, empresa: "INTERMEDIARIA INTERMEX", jefe_id: "u2", activo: true, initials: "CM" },
+  { id: "u8", nombre: "Sofía Ramírez", correo: "usuario3@cklass.com", password: "User323!", rfc: "RASO910822PQ4", rol_id: 1, empresa: "TRANSPORTES DE PERSONAL Y MERCANCIA", jefe_id: "u2", activo: true, initials: "SR" },
 ];
 
 const SEED_SOCIEDADES: Sociedad[] = [
@@ -265,6 +270,12 @@ const SEED_SOLICITUDES: Solicitud[] = [
   { id: "s9", folio: "#0044", user_id: "u6", fecha: "28/08/2026", empresa: "WATA GROUP", origen: "Guadalajara", destino_resumen: "GDL - CDMX", tipo_viaje: "Visita a proveedores", motivo: "Negociación con proveedor nuevo", personas_count: 1, personas_nombres: "D. Ramírez", monto_total: 6100, jefe_status: "Pendiente", finanzas_status: "Pendiente", estatus: "Abierto", comprobante_viaje: null, created_at: "2026-08-28" },
   { id: "s10", folio: "#0045", user_id: "u3", fecha: "01/09/2026", empresa: "WATA GROUP", origen: "Guadalajara", destino_resumen: "GDL - Querétaro", tipo_viaje: "Capacitación", motivo: "Capacitación de equipo comercial", personas_count: 1, personas_nombres: "M. Torres", monto_total: 4500, jefe_status: "Autorizado", finanzas_status: "N/A", estatus: "Cerrado", comprobante_viaje: null, created_at: "2026-09-01" },
   { id: "s11", folio: "#0046", user_id: "u3", fecha: "03/09/2026", empresa: "WATA GROUP", origen: "Guadalajara", destino_resumen: "GDL - Colima", tipo_viaje: "Comercial", motivo: "Visita a cliente potencial", personas_count: 1, personas_nombres: "M. Torres", monto_total: 2100, jefe_status: "Rechazado", finanzas_status: "N/A", estatus: "Rechazado", comprobante_viaje: null, nota_rechazo: "Motivo de viaje insuficientemente justificado.", created_at: "2026-09-03" },
+  // Carlos Mendoza (INTERMEDIARIA INTERMEX): una pendiente de autorizar y una ya comprobada.
+  { id: "s12", folio: "#0047", user_id: "u7", fecha: "10/09/2026", empresa: "INTERMEDIARIA INTERMEX", origen: "Guadalajara", destino_resumen: "GDL - Zacatecas", tipo_viaje: "Visita a proveedores", motivo: "Revisión de flotilla en punto de distribución Zacatecas", personas_count: 1, personas_nombres: "C. Mendoza", monto_total: 6400, jefe_status: "Pendiente", finanzas_status: "Pendiente", estatus: "Abierto", comprobante_viaje: null, created_at: "2026-09-10" },
+  { id: "s13", folio: "#0048", user_id: "u7", fecha: "05/09/2026", empresa: "INTERMEDIARIA INTERMEX", origen: "Guadalajara", destino_resumen: "GDL - CDMX", tipo_viaje: "Auditoría", motivo: "Revisión de cumplimiento normativo trimestral", personas_count: 1, personas_nombres: "C. Mendoza", monto_total: 4200, jefe_status: "Autorizado", finanzas_status: "N/A", estatus: "Cerrado", comprobante_viaje: "18/09/2026", created_at: "2026-09-05" },
+  // Sofía Ramírez (TRANSPORTES DE PERSONAL Y MERCANCIA): una pendiente y una ya cerrada.
+  { id: "s14", folio: "#0049", user_id: "u8", fecha: "12/09/2026", empresa: "TRANSPORTES DE PERSONAL Y MERCANCIA", origen: "Guadalajara", destino_resumen: "GDL - Monterrey", tipo_viaje: "Comercial", motivo: "Negociación de contrato con cliente transportista", personas_count: 1, personas_nombres: "S. Ramírez", monto_total: 5800, jefe_status: "Pendiente", finanzas_status: "Pendiente", estatus: "Abierto", comprobante_viaje: null, created_at: "2026-09-12" },
+  { id: "s15", folio: "#0050", user_id: "u8", fecha: "14/09/2026", empresa: "TRANSPORTES DE PERSONAL Y MERCANCIA", origen: "Guadalajara", destino_resumen: "GDL - Querétaro", tipo_viaje: "Visita a tiendas", motivo: "Supervisión de operación logística en centro de distribución", personas_count: 1, personas_nombres: "S. Ramírez", monto_total: 3100, jefe_status: "Autorizado", finanzas_status: "N/A", estatus: "Cerrado", comprobante_viaje: "21/09/2026", created_at: "2026-09-14" },
 ];
 
 const SEED_AUTORIZACIONES: Autorizacion[] = [
@@ -277,6 +288,8 @@ const SEED_AUTORIZACIONES: Autorizacion[] = [
   { id: "a7", solicitud_id: "s6", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-04-02", nota: "" },
   { id: "a8", solicitud_id: "s10", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-09-02", nota: "" },
   { id: "a9", solicitud_id: "s11", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "rechazado", fecha: "2026-09-04", nota: "Motivo de viaje insuficientemente justificado." },
+  { id: "a10", solicitud_id: "s13", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-09-06", nota: "" },
+  { id: "a11", solicitud_id: "s15", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-09-15", nota: "" },
 ];
 
 const SEED_COMPROBANTES: ComprobanteGasto[] = [
@@ -290,6 +303,210 @@ const SEED_COMPROBANTES: ComprobanteGasto[] = [
   { id: "cg8", solicitud_id: "s10", concepto: "Transporte local", monto_solicitado: 300, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cg9", solicitud_id: "s10", concepto: "Comida", monto_solicitado: 900, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cg10", solicitud_id: "s10", concepto: "Otros", monto_solicitado: 300, monto_comprobado: 0, status_renglon: "pendiente" },
+];
+
+// Desglose (hoteles, transportes, otros conceptos) por destino de cada
+// solicitud sembrada, en el mismo formato que guarda "Solicitar viáticos" en
+// KEYS.destinos — permite que quien autoriza (Jefe/Finanzas/Compras) vea el
+// detalle completo en Estatus, no solo el monto total. s2 y s10 ya tenían su
+// desglose de montos en SEED_COMPROBANTES (cg1-cg5 y cg6-cg10): aquí se les da
+// un Destino cuyos montos cuadran con esos renglones ya existentes.
+const SEED_DESTINOS_DETALLE = [
+  {
+    id: "dd_s1", solicitud_id: "s1", estado: "Guanajuato",
+    fecha_inicio: "2026-05-23", fecha_fin: "2026-05-28",
+    hoteles: [{ id: "hh_s1", fecha_inicio: "2026-05-23", fecha_fin: "2026-05-28", monto: 620, manual: false }],
+    foraneo: [{ id: "rf_s1", tipo: "Autobús", monto: 2254 }],
+    local: [{ id: "rl_s1", tipo: "Uber", monto: 773 }],
+    otros: [{ id: "ro_s1", concepto: "Imprevistos", monto: 313 }],
+  },
+  {
+    id: "dd_s2", solicitud_id: "s2", estado: "CDMX",
+    fecha_inicio: "2026-05-17", fecha_fin: "2026-05-19",
+    hoteles: [{ id: "hh_s2", fecha_inicio: "2026-05-17", fecha_fin: "2026-05-19", monto: 1600, manual: true }],
+    foraneo: [{ id: "rf_s2", tipo: "Avión", monto: 1800 }],
+    local: [{ id: "rl_s2", tipo: "Uber", monto: 400 }],
+    otros: [{ id: "ro_s2", concepto: "Regalos para cliente", monto: 500 }],
+  },
+  {
+    // Monto manual de hotel notablemente por encima de la tarifa de catálogo
+    // en Colima (~$480-550): consistente con la nota de rechazo de este folio
+    // ("Monto de hotel no corresponde a tarifa acordada").
+    id: "dd_s3", solicitud_id: "s3", estado: "Colima",
+    fecha_inicio: "2026-05-05", fecha_fin: "2026-05-07",
+    hoteles: [{ id: "hh_s3", fecha_inicio: "2026-05-05", fecha_fin: "2026-05-07", monto: 1200, manual: true }],
+    foraneo: [{ id: "rf_s3", tipo: "Autobús", monto: 500 }],
+    local: [{ id: "rl_s3", tipo: "Uber", monto: 200 }],
+    otros: [{ id: "ro_s3", concepto: "Imprevistos", monto: 100 }],
+  },
+  {
+    id: "dd_s4", solicitud_id: "s4", estado: "Zacatecas",
+    fecha_inicio: "2026-04-28", fecha_fin: "2026-05-02",
+    hoteles: [{ id: "hh_s4", fecha_inicio: "2026-04-28", fecha_fin: "2026-05-02", monto: 890, manual: false }],
+    foraneo: [{ id: "rf_s4", tipo: "Autobús", monto: 2800 }],
+    local: [{ id: "rl_s4", tipo: "Uber", monto: 960 }],
+    otros: [{ id: "ro_s4", concepto: "Material de capacitación", monto: 680 }],
+  },
+  {
+    id: "dd_s5", solicitud_id: "s5", estado: "Nuevo León",
+    fecha_inicio: "2026-04-13", fecha_fin: "2026-04-15",
+    hoteles: [{ id: "hh_s5", fecha_inicio: "2026-04-13", fecha_fin: "2026-04-15", monto: 950, manual: false }],
+    foraneo: [{ id: "rf_s5", tipo: "Avión", monto: 1344 }],
+    local: [{ id: "rl_s5", tipo: "Uber", monto: 461 }],
+    otros: [{ id: "ro_s5", concepto: "Imprevistos", monto: 135 }],
+  },
+  {
+    id: "dd_s6", solicitud_id: "s6", estado: "Querétaro",
+    fecha_inicio: "2026-04-04", fecha_fin: "2026-04-05",
+    hoteles: [{ id: "hh_s6", fecha_inicio: "2026-04-04", fecha_fin: "2026-04-05", monto: 760, manual: false }],
+    foraneo: [{ id: "rf_s6", tipo: "Autobús", monto: 868 }],
+    local: [{ id: "rl_s6", tipo: "Uber", monto: 298 }],
+    otros: [{ id: "ro_s6", concepto: "Papelería", monto: 554 }],
+  },
+  {
+    id: "dd_s7", solicitud_id: "s7", estado: "Nuevo León",
+    fecha_inicio: "2026-08-23", fecha_fin: "2026-08-26",
+    hoteles: [{ id: "hh_s7", fecha_inicio: "2026-08-23", fecha_fin: "2026-08-26", monto: 950, manual: false }],
+    foraneo: [{ id: "rf_s7", tipo: "Avión", monto: 2016 }],
+    local: [{ id: "rl_s7", tipo: "Uber", monto: 691 }],
+    otros: [{ id: "ro_s7", concepto: "Imprevistos", monto: 203 }],
+  },
+  {
+    id: "dd_s8", solicitud_id: "s8", estado: "Colima",
+    fecha_inicio: "2026-08-28", fecha_fin: "2026-08-30",
+    hoteles: [{ id: "hh_s8", fecha_inicio: "2026-08-28", fecha_fin: "2026-08-30", monto: 550, manual: false }],
+    foraneo: [{ id: "rf_s8", tipo: "Autobús", monto: 896 }],
+    local: [{ id: "rl_s8", tipo: "Uber", monto: 307 }],
+    otros: [{ id: "ro_s8", concepto: "Imprevistos", monto: 257 }],
+  },
+  {
+    id: "dd_s9", solicitud_id: "s9", estado: "CDMX",
+    fecha_inicio: "2026-08-31", fecha_fin: "2026-09-02",
+    hoteles: [{ id: "hh_s9", fecha_inicio: "2026-08-31", fecha_fin: "2026-09-02", monto: 1100, manual: false }],
+    foraneo: [{ id: "rf_s9", tipo: "Avión", monto: 1708 }],
+    local: [{ id: "rl_s9", tipo: "Uber", monto: 586 }],
+    otros: [{ id: "ro_s9", concepto: "Muestras de producto", monto: 386 }],
+  },
+  {
+    id: "dd_s10", solicitud_id: "s10", estado: "Querétaro",
+    fecha_inicio: "2026-09-04", fecha_fin: "2026-09-06",
+    hoteles: [{ id: "hh_s10", fecha_inicio: "2026-09-04", fecha_fin: "2026-09-06", monto: 1600, manual: true }],
+    foraneo: [{ id: "rf_s10", tipo: "Autobús", monto: 1400 }],
+    local: [{ id: "rl_s10", tipo: "Uber", monto: 300 }],
+    otros: [{ id: "ro_s10", concepto: "Material de capacitación", monto: 300 }],
+  },
+  {
+    id: "dd_s11", solicitud_id: "s11", estado: "Colima",
+    fecha_inicio: "2026-09-06", fecha_fin: "2026-09-07",
+    hoteles: [{ id: "hh_s11", fecha_inicio: "2026-09-06", fecha_fin: "2026-09-07", monto: 550, manual: false }],
+    foraneo: [{ id: "rf_s11", tipo: "Autobús", monto: 588 }],
+    local: [{ id: "rl_s11", tipo: "Uber", monto: 202 }],
+    otros: [{ id: "ro_s11", concepto: "Imprevistos", monto: 340 }],
+  },
+  {
+    id: "dd_s12", solicitud_id: "s12", estado: "Zacatecas",
+    fecha_inicio: "2026-09-13", fecha_fin: "2026-09-16",
+    hoteles: [{ id: "hh_s12", fecha_inicio: "2026-09-13", fecha_fin: "2026-09-16", monto: 890, manual: false }],
+    foraneo: [{ id: "rf_s12", tipo: "Autobús", monto: 1792 }],
+    local: [{ id: "rl_s12", tipo: "Uber", monto: 614 }],
+    otros: [{ id: "ro_s12", concepto: "Imprevistos", monto: 44 }],
+  },
+  {
+    id: "dd_s13", solicitud_id: "s13", estado: "CDMX",
+    fecha_inicio: "2026-09-08", fecha_fin: "2026-09-09",
+    hoteles: [{ id: "hh_s13", fecha_inicio: "2026-09-08", fecha_fin: "2026-09-09", monto: 1100, manual: false }],
+    foraneo: [{ id: "rf_s13", tipo: "Avión", monto: 1176 }],
+    local: [{ id: "rl_s13", tipo: "Uber", monto: 403 }],
+    otros: [{ id: "ro_s13", concepto: "Papelería", monto: 681 }],
+  },
+  {
+    id: "dd_s14", solicitud_id: "s14", estado: "Nuevo León",
+    fecha_inicio: "2026-09-15", fecha_fin: "2026-09-17",
+    hoteles: [{ id: "hh_s14", fecha_inicio: "2026-09-15", fecha_fin: "2026-09-17", monto: 950, manual: false }],
+    foraneo: [{ id: "rf_s14", tipo: "Avión", monto: 1624 }],
+    local: [{ id: "rl_s14", tipo: "Uber", monto: 557 }],
+    otros: [{ id: "ro_s14", concepto: "Imprevistos", monto: 559 }],
+  },
+  {
+    id: "dd_s15", solicitud_id: "s15", estado: "Querétaro",
+    fecha_inicio: "2026-09-17", fecha_fin: "2026-09-18",
+    hoteles: [{ id: "hh_s15", fecha_inicio: "2026-09-17", fecha_fin: "2026-09-18", monto: 870, manual: false }],
+    foraneo: [{ id: "rf_s15", tipo: "Autobús", monto: 868 }],
+    local: [{ id: "rl_s15", tipo: "Uber", monto: 298 }],
+    otros: [{ id: "ro_s15", concepto: "Imprevistos", monto: 444 }],
+  },
+];
+
+// Renglones de comprobación para las solicitudes sembradas que aún no tenían
+// (s2 y s10 ya venían en SEED_COMPROBANTES); mismos montos que sus Destino en
+// SEED_DESTINOS_DETALLE para que "Resumen de montos" en Estatus cuadre.
+const SEED_COMPROBANTES_DETALLE: ComprobanteGasto[] = [
+  { id: "cgd_s1_1", solicitud_id: "s1", concepto: "Hotel", monto_solicitado: 3100, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s1_2", solicitud_id: "s1", concepto: "Transporte foráneo", monto_solicitado: 2254, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s1_3", solicitud_id: "s1", concepto: "Transporte local", monto_solicitado: 773, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s1_4", solicitud_id: "s1", concepto: "Comida", monto_solicitado: 1610, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s1_5", solicitud_id: "s1", concepto: "Otros", monto_solicitado: 313, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s3_1", solicitud_id: "s3", concepto: "Hotel", monto_solicitado: 1200, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s3_2", solicitud_id: "s3", concepto: "Transporte foráneo", monto_solicitado: 500, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s3_3", solicitud_id: "s3", concepto: "Transporte local", monto_solicitado: 200, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s3_4", solicitud_id: "s3", concepto: "Comida", monto_solicitado: 500, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s3_5", solicitud_id: "s3", concepto: "Otros", monto_solicitado: 100, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s4_1", solicitud_id: "s4", concepto: "Hotel", monto_solicitado: 3560, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s4_2", solicitud_id: "s4", concepto: "Transporte foráneo", monto_solicitado: 2800, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s4_3", solicitud_id: "s4", concepto: "Transporte local", monto_solicitado: 960, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s4_4", solicitud_id: "s4", concepto: "Comida", monto_solicitado: 2000, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s4_5", solicitud_id: "s4", concepto: "Otros", monto_solicitado: 680, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s5_1", solicitud_id: "s5", concepto: "Hotel", monto_solicitado: 1900, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s5_2", solicitud_id: "s5", concepto: "Transporte foráneo", monto_solicitado: 1344, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s5_3", solicitud_id: "s5", concepto: "Transporte local", monto_solicitado: 461, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s5_4", solicitud_id: "s5", concepto: "Comida", monto_solicitado: 960, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s5_5", solicitud_id: "s5", concepto: "Otros", monto_solicitado: 135, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s6_1", solicitud_id: "s6", concepto: "Hotel", monto_solicitado: 760, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s6_2", solicitud_id: "s6", concepto: "Transporte foráneo", monto_solicitado: 868, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s6_3", solicitud_id: "s6", concepto: "Transporte local", monto_solicitado: 298, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s6_4", solicitud_id: "s6", concepto: "Comida", monto_solicitado: 620, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s6_5", solicitud_id: "s6", concepto: "Otros", monto_solicitado: 554, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s7_1", solicitud_id: "s7", concepto: "Hotel", monto_solicitado: 2850, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s7_2", solicitud_id: "s7", concepto: "Transporte foráneo", monto_solicitado: 2016, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s7_3", solicitud_id: "s7", concepto: "Transporte local", monto_solicitado: 691, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s7_4", solicitud_id: "s7", concepto: "Comida", monto_solicitado: 1440, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s7_5", solicitud_id: "s7", concepto: "Otros", monto_solicitado: 203, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s8_1", solicitud_id: "s8", concepto: "Hotel", monto_solicitado: 1100, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s8_2", solicitud_id: "s8", concepto: "Transporte foráneo", monto_solicitado: 896, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s8_3", solicitud_id: "s8", concepto: "Transporte local", monto_solicitado: 307, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s8_4", solicitud_id: "s8", concepto: "Comida", monto_solicitado: 640, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s8_5", solicitud_id: "s8", concepto: "Otros", monto_solicitado: 257, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s9_1", solicitud_id: "s9", concepto: "Hotel", monto_solicitado: 2200, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s9_2", solicitud_id: "s9", concepto: "Transporte foráneo", monto_solicitado: 1708, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s9_3", solicitud_id: "s9", concepto: "Transporte local", monto_solicitado: 586, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s9_4", solicitud_id: "s9", concepto: "Comida", monto_solicitado: 1220, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s9_5", solicitud_id: "s9", concepto: "Otros", monto_solicitado: 386, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s11_1", solicitud_id: "s11", concepto: "Hotel", monto_solicitado: 550, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s11_2", solicitud_id: "s11", concepto: "Transporte foráneo", monto_solicitado: 588, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s11_3", solicitud_id: "s11", concepto: "Transporte local", monto_solicitado: 202, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s11_4", solicitud_id: "s11", concepto: "Comida", monto_solicitado: 420, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s11_5", solicitud_id: "s11", concepto: "Otros", monto_solicitado: 340, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s12_1", solicitud_id: "s12", concepto: "Hotel", monto_solicitado: 2670, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s12_2", solicitud_id: "s12", concepto: "Transporte foráneo", monto_solicitado: 1792, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s12_3", solicitud_id: "s12", concepto: "Transporte local", monto_solicitado: 614, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s12_4", solicitud_id: "s12", concepto: "Comida", monto_solicitado: 1280, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s12_5", solicitud_id: "s12", concepto: "Otros", monto_solicitado: 44, monto_comprobado: 0, status_renglon: "pendiente" },
+  // s13 (#0048) ya fue comprobada por completo.
+  { id: "cgd_s13_1", solicitud_id: "s13", concepto: "Hotel", monto_solicitado: 1100, monto_comprobado: 1100, status_renglon: "comprobado" },
+  { id: "cgd_s13_2", solicitud_id: "s13", concepto: "Transporte foráneo", monto_solicitado: 1176, monto_comprobado: 1176, status_renglon: "comprobado" },
+  { id: "cgd_s13_3", solicitud_id: "s13", concepto: "Transporte local", monto_solicitado: 403, monto_comprobado: 403, status_renglon: "comprobado" },
+  { id: "cgd_s13_4", solicitud_id: "s13", concepto: "Comida", monto_solicitado: 840, monto_comprobado: 840, status_renglon: "comprobado" },
+  { id: "cgd_s13_5", solicitud_id: "s13", concepto: "Otros", monto_solicitado: 681, monto_comprobado: 681, status_renglon: "comprobado" },
+  { id: "cgd_s14_1", solicitud_id: "s14", concepto: "Hotel", monto_solicitado: 1900, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s14_2", solicitud_id: "s14", concepto: "Transporte foráneo", monto_solicitado: 1624, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s14_3", solicitud_id: "s14", concepto: "Transporte local", monto_solicitado: 557, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s14_4", solicitud_id: "s14", concepto: "Comida", monto_solicitado: 1160, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s14_5", solicitud_id: "s14", concepto: "Otros", monto_solicitado: 559, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s15_1", solicitud_id: "s15", concepto: "Hotel", monto_solicitado: 870, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s15_2", solicitud_id: "s15", concepto: "Transporte foráneo", monto_solicitado: 868, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s15_3", solicitud_id: "s15", concepto: "Transporte local", monto_solicitado: 298, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s15_4", solicitud_id: "s15", concepto: "Comida", monto_solicitado: 620, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s15_5", solicitud_id: "s15", concepto: "Otros", monto_solicitado: 444, monto_comprobado: 0, status_renglon: "pendiente" },
 ];
 
 const SEED_CONFIG = {
@@ -341,6 +558,50 @@ export function initSeed() {
   backfillComprasCorporativas();
   backfillDemoBatch2026_09();
   backfillAutomationsConfig();
+  backfillDestinoDetalle();
+  backfillEmpleadosMultiSociedad();
+}
+
+// Empleados de ejemplo (rol "usuario") en las otras dos sociedades — antes
+// solo WATA GROUP tenía un empleado con solicitudes de prueba. Se agregan
+// aquí (no en SEED_USERS/SEED_SOLICITUDES a secas) para que también lleguen a
+// navegadores que ya tenían datos sembrados.
+function backfillEmpleadosMultiSociedad() {
+  const users = lsGet<User[]>(KEYS.users, []);
+  const faltanUsers = SEED_USERS.filter(
+    (u) => ["u7", "u8"].includes(u.id) && !users.some((x) => x.id === u.id),
+  );
+  if (faltanUsers.length) lsSet(KEYS.users, [...users, ...faltanUsers]);
+
+  const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
+  const idsNuevos = ["s12", "s13", "s14", "s15"];
+  const faltanSolicitudes = SEED_SOLICITUDES.filter(
+    (s) => idsNuevos.includes(s.id) && !solicitudes.some((x) => x.id === s.id),
+  );
+  if (faltanSolicitudes.length) lsSet(KEYS.solicitudes, [...faltanSolicitudes, ...solicitudes]);
+
+  const autorizaciones = lsGet<Autorizacion[]>(KEYS.autorizaciones, []);
+  const faltanAut = SEED_AUTORIZACIONES.filter(
+    (a) => ["a10", "a11"].includes(a.id) && !autorizaciones.some((x) => x.id === a.id),
+  );
+  if (faltanAut.length) lsSet(KEYS.autorizaciones, [...autorizaciones, ...faltanAut]);
+}
+
+// Le da desglose (hoteles, transportes, otros conceptos) a las solicitudes
+// sembradas que aún no lo tenían, para que "Estatus" pueda mostrárselo a quien
+// autoriza. Idempotente: solo agrega lo que falte por solicitud_id/id.
+function backfillDestinoDetalle() {
+  const destinos = lsGet<{ solicitud_id: string }[]>(KEYS.destinos, []);
+  const faltanDestinos = SEED_DESTINOS_DETALLE.filter(
+    (d) => !destinos.some((x) => x.solicitud_id === d.solicitud_id),
+  );
+  if (faltanDestinos.length) lsSet(KEYS.destinos, [...destinos, ...faltanDestinos]);
+
+  const comprobantes = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  const faltanComprobantes = SEED_COMPROBANTES_DETALLE.filter(
+    (c) => !comprobantes.some((x) => x.id === c.id),
+  );
+  if (faltanComprobantes.length) lsSet(KEYS.comprobantesGasto, [...comprobantes, ...faltanComprobantes]);
 }
 
 // Navegadores que ya tenían ckl_config guardado antes de que existieran los

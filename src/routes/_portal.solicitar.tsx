@@ -756,7 +756,7 @@ function OtrosSection({ rows, onChange }: { rows: OtroRow[]; onChange: (r: OtroR
 export function Modal({ children, onClose }: { children: React.ReactNode; onClose?: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="ckl-card relative w-full max-w-md p-6">
+      <div className="ckl-card relative max-h-[85vh] w-full max-w-md overflow-y-auto p-6">
         {onClose && (
           <button onClick={onClose} className="absolute right-3 top-3 rounded p-1 hover:bg-secondary"><X size={16} /></button>
         )}

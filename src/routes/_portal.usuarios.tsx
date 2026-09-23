@@ -24,11 +24,15 @@ const ROLE_COLORS: Record<string, { bg: string; fg: string }> = {
 const ADMIN_LOCK_MSG = "Solo un administrador puede modificar cuentas de administrador.";
 
 function Usuarios() {
-  const { role: myRole } = useAuth();
+  const { role: myRole, hasPerm } = useAuth();
   const [users, setUsers] = useLocalStorage<User[]>(KEYS.users, []);
   const [roles] = useLocalStorage<Role[]>(KEYS.roles, []);
   const [edit, setEdit] = useState<User | null>(null);
   const [creating, setCreating] = useState(false);
+
+  if (!hasPerm("gestionar_usuarios")) {
+    return <div className="ckl-card p-8 text-center text-sm">Sin permiso para acceder.</div>;
+  }
 
   const roleName = (id: number) => roles.find((r) => r.id === id)?.nombre ?? "—";
   const jefe = (id: string | null) => users.find((u) => u.id === id)?.nombre ?? "—";

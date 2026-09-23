@@ -114,6 +114,8 @@ function LoginPage() {
                 <div className="mb-1 font-semibold text-foreground">Demo (correo o RFC, misma contraseña):</div>
                 <div>Admin: admin@cklass.com · PEAL800101AB1 · Admin123!</div>
                 <div>Usuario: usuario@cklass.com · TOMM900312EF3 · User123!</div>
+                <div>Usuario 2: usuario2@cklass.com · MECA880215MN8 · User223!</div>
+                <div>Usuario 3: usuario3@cklass.com · RASO910822PQ4 · User323!</div>
                 <div>Jefe: jefe@cklass.com · ALAJ750505CD2 · Jefe123!</div>
                 <div>Finanzas: finanzas@cklass.com · VEGAL850620GH4 · Fin123!</div>
                 <div>Compras: compras@cklass.com · RADI870415KL7 · Compras123!</div>
