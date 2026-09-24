@@ -161,7 +161,9 @@ const SEED_ROLES: Role[] = [
   {
     id: 3, nombre: "gestor_vuelos",
     permisos: {
-      solicitar: false, ver_propio: false, comprobar: false,
+      // comprobar: true, pero la pantalla de Comprobación le restringe a solo
+      // el concepto "Avión" (ver role.nombre === "gestor_vuelos" ahí).
+      solicitar: false, ver_propio: false, comprobar: true,
       ver_equipo: false, ver_todo: true,
       autorizar_lte5000: false, autorizar_gt5000: false,
       rechazar: false, subir_comprobantes_viaje: true,
@@ -611,6 +613,86 @@ export function initSeed() {
   backfillEmpleadosMultiSociedad();
   backfillEscenariosComprobacion();
   backfillFolioCollisions();
+  backfillGestorVuelosComprobar();
+  backfillDesgloseTransportePorTipo();
+}
+
+// Gestor de vuelos gana acceso a Comprobación (antes comprobar: false) — la
+// propia pantalla se encarga de mostrarle solo el concepto "Avión".
+function backfillGestorVuelosComprobar() {
+  const roles = lsGet<Role[]>(KEYS.roles, []);
+  const gestor = roles.find((r) => r.nombre === "gestor_vuelos");
+  if (gestor && !gestor.permisos.comprobar) {
+    lsSet(
+      KEYS.roles,
+      roles.map((r) => (r.id === gestor.id ? { ...r, permisos: { ...r.permisos, comprobar: true } } : r)),
+    );
+  }
+}
+
+// Antes "Transporte foráneo"/"Transporte local" agrupaban TODOS sus medios
+// (Avión, Autobús, Uber, Taxi...) en un solo renglón de comprobación, lo que
+// no dejaba claro qué había que comprobar cuando había más de uno (p. ej.
+// Avión + Autobús en el mismo folio). Se reconstruyen como un renglón por
+// cada medio realmente usado, a partir del desglose real en KEYS.destinos —
+// funciona tanto para las solicitudes de ejemplo como para cualquier
+// solicitud real ya guardada con el esquema anterior.
+function backfillDesgloseTransportePorTipo() {
+  const destinos = lsGet<
+    {
+      solicitud_id: string;
+      foraneo?: { tipo: string; monto: number }[];
+      local?: { tipo: string; monto: number }[];
+    }[]
+  >(KEYS.destinos, []);
+  const porSolicitud = new Map<string, { foraneo: Map<string, number>; local: Map<string, number> }>();
+  for (const d of destinos) {
+    const acc = porSolicitud.get(d.solicitud_id) ?? { foraneo: new Map(), local: new Map() };
+    for (const r of d.foraneo ?? []) {
+      const monto = Number(r.monto) || 0;
+      if (monto <= 0) continue;
+      const concepto = r.tipo === "Otro" ? "Otro (foráneo)" : r.tipo;
+      acc.foraneo.set(concepto, (acc.foraneo.get(concepto) ?? 0) + monto);
+    }
+    for (const r of d.local ?? []) {
+      const monto = Number(r.monto) || 0;
+      if (monto <= 0) continue;
+      const concepto = r.tipo === "Otro" ? "Otro (transporte local)" : r.tipo;
+      acc.local.set(concepto, (acc.local.get(concepto) ?? 0) + monto);
+    }
+    porSolicitud.set(d.solicitud_id, acc);
+  }
+
+  const comprobantes = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  const NOMBRES_VIEJOS = new Set(["Transporte foráneo", "Transporte local"]);
+  // Solo se migran solicitudes de las que sí se tiene el desglose real — sin
+  // eso no hay con qué reconstruir, y es mejor dejar el renglón viejo intacto
+  // que perder el dato.
+  const aMigrar = new Set(
+    comprobantes
+      .filter((c) => NOMBRES_VIEJOS.has(c.concepto) && porSolicitud.has(c.solicitud_id))
+      .map((c) => c.solicitud_id),
+  );
+  if (aMigrar.size === 0) return;
+
+  const conservados = comprobantes.filter(
+    (c) => !(aMigrar.has(c.solicitud_id) && (NOMBRES_VIEJOS.has(c.concepto) || c.concepto === "Avión")),
+  );
+  const nuevos: ComprobanteGasto[] = [];
+  for (const solId of aMigrar) {
+    const totales = porSolicitud.get(solId)!;
+    for (const [concepto, monto] of [...totales.foraneo, ...totales.local]) {
+      nuevos.push({
+        id: uid("cg_"),
+        solicitud_id: solId,
+        concepto,
+        monto_solicitado: monto,
+        monto_comprobado: 0,
+        status_renglon: "pendiente",
+      });
+    }
+  }
+  lsSet(KEYS.comprobantesGasto, [...conservados, ...nuevos]);
 }
 
 // Los folios de ejemplo (SEED_SOLICITUDES) usan números fijos elegidos al

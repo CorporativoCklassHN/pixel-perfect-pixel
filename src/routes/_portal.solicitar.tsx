@@ -24,7 +24,7 @@ export const Route = createFileRoute("/_portal/solicitar")({
 
 const ESTADOS = ["Jalisco", "CDMX", "Guanajuato", "Nuevo León", "Querétaro", "Colima", "Zacatecas"];
 const TIPOS = ["Comercial", "Auditoría", "Visita a tiendas", "Capacitación", "Expos", "Visita a proveedores", "Otros"];
-const MEDIOS_FORANEO = ["Avión", "Autobús", "Tren", "Barco", "Otro"];
+const MEDIOS_FORANEO = ["Avión", "Autobús", "Tren", "Otro"];
 const MEDIOS_LOCAL = ["Uber", "Taxi", "Metro", "Combi", "Otro"];
 
 type Row = { id: string; tipo: string; monto: number };
@@ -181,7 +181,11 @@ function Solicitar() {
     setDestinos((arr) => arr.map((d) => (d.id === id ? { ...d, ...patch } : d)));
 
   const totals = useMemo(() => {
-    let foraneo = 0, local = 0, otros = 0, hotel = 0, diasTot = 0;
+    let foraneo = 0,
+      local = 0,
+      otros = 0,
+      hotel = 0,
+      diasTot = 0;
     for (const d of destinos) {
       for (const h of d.hoteles) {
         // El monto (venga del catálogo o sea manual) siempre es la tarifa por
@@ -307,6 +311,38 @@ function Solicitar() {
     const cg = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []).filter(
       (c) => c.solicitud_id !== solId,
     );
+    // Un renglón de comprobación por cada medio de transporte realmente
+    // seleccionado (Avión, Autobús, Uber, Taxi...) en vez de un solo
+    // "Transporte foráneo"/"Transporte local" genérico — así queda claro qué
+    // hay que comprobar. "Otro" se distingue entre foráneo y local porque el
+    // mismo nombre puede repetirse en ambas secciones.
+    const foraneoPorTipo = new Map<string, number>();
+    const localPorTipo = new Map<string, number>();
+    for (const d of destinos) {
+      for (const r of d.foraneo) {
+        const monto = Number(r.monto) || 0;
+        if (monto <= 0) continue;
+        const concepto = r.tipo === "Otro" ? "Otro (foráneo)" : r.tipo;
+        foraneoPorTipo.set(concepto, (foraneoPorTipo.get(concepto) ?? 0) + monto);
+      }
+      for (const r of d.local) {
+        const monto = Number(r.monto) || 0;
+        if (monto <= 0) continue;
+        const concepto = r.tipo === "Otro" ? "Otro (transporte local)" : r.tipo;
+        localPorTipo.set(concepto, (localPorTipo.get(concepto) ?? 0) + monto);
+      }
+    }
+    const transporteCg: ComprobanteGasto[] = [...foraneoPorTipo, ...localPorTipo].map(
+      ([concepto, monto]) => ({
+        id: uid("cg_"),
+        solicitud_id: solId,
+        concepto,
+        monto_solicitado: monto,
+        monto_comprobado: 0,
+        status_renglon: "pendiente",
+      }),
+    );
+
     const newCg: ComprobanteGasto[] = [
       {
         id: uid("cg_"),
@@ -316,22 +352,7 @@ function Solicitar() {
         monto_comprobado: 0,
         status_renglon: "pendiente",
       },
-      {
-        id: uid("cg_"),
-        solicitud_id: solId,
-        concepto: "Transporte foráneo",
-        monto_solicitado: totals.foraneo,
-        monto_comprobado: 0,
-        status_renglon: "pendiente",
-      },
-      {
-        id: uid("cg_"),
-        solicitud_id: solId,
-        concepto: "Transporte local",
-        monto_solicitado: totals.local,
-        monto_comprobado: 0,
-        status_renglon: "pendiente",
-      },
+      ...transporteCg,
       {
         id: uid("cg_"),
         solicitud_id: solId,
@@ -406,7 +427,14 @@ function Solicitar() {
             </select>
           </Field>
           <Field label="No. de personas">
-            <input type="number" min={1} className="ckl-input" value={personas} onChange={(e) => setPersonas(+e.target.value)} />
+            <input
+              type="number"
+              min={1}
+              className="ckl-input"
+              value={personas}
+              onChange={(e) => setPersonas(+e.target.value)}
+              onWheel={(e) => e.currentTarget.blur()}
+            />
           </Field>
           <Field
             label={personas > 1 ? "Nombres de viajeros" : "Nombre del viajero"}
@@ -751,6 +779,7 @@ function DestinoBlock({
                       value={h.monto}
                       onFocus={(e) => e.target.select()}
                       onChange={(e) => updateHotel(h.id, { monto: +e.target.value })}
+                      onWheel={(e) => e.currentTarget.blur()}
                       placeholder="Monto por noche"
                     />
                   )}
@@ -797,6 +826,7 @@ function RowsSection({ title, medios, rows, onChange }: { title: string; medios:
               value={r.monto}
               onFocus={(e) => e.target.select()}
               onChange={(e) => onChange(rows.map((x) => x.id === r.id ? { ...x, monto: +e.target.value } : x))}
+              onWheel={(e) => e.currentTarget.blur()}
             />
             <button onClick={() => onChange(rows.filter((x) => x.id !== r.id))} className="ckl-btn-ghost"><X size={14} /></button>
           </div>
@@ -828,6 +858,7 @@ function OtrosSection({ rows, onChange }: { rows: OtroRow[]; onChange: (r: OtroR
               value={r.monto}
               onFocus={(e) => e.target.select()}
               onChange={(e) => onChange(rows.map((x) => x.id === r.id ? { ...x, monto: +e.target.value } : x))}
+              onWheel={(e) => e.currentTarget.blur()}
             />
             <button onClick={() => onChange(rows.filter((x) => x.id !== r.id))} className="ckl-btn-ghost"><X size={14} /></button>
           </div>
@@ -839,8 +870,14 @@ function OtrosSection({ rows, onChange }: { rows: OtroRow[]; onChange: (r: OtroR
 
 export function Modal({ children, onClose }: { children: React.ReactNode; onClose?: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="ckl-card relative max-h-[85vh] w-full max-w-md overflow-y-auto p-6">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="ckl-card relative max-h-[85vh] w-full max-w-md overflow-y-auto p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
         {onClose && (
           <button onClick={onClose} className="absolute right-3 top-3 rounded p-1 hover:bg-secondary"><X size={16} /></button>
         )}

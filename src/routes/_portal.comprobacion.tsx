@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Upload, FileText, FileCode, Trash2, Eye, Download } from "lucide-react";
 import { toast } from "sonner";
-import { useLocalStorage } from "@/lib/auth";
+import { useAuth, useLocalStorage } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
 import {
   KEYS,
@@ -72,6 +72,12 @@ function descargarFactura(f: Factura) {
 }
 
 function Comprobacion() {
+  const { role } = useAuth();
+  // Gestor de vuelos solo debe ver/comprobar el concepto "Avión" de cada
+  // folio — el resto (Hotel, Transporte foráneo terrestre, Transporte local,
+  // Comida, Otros) y las secciones de No deducibles/Depósito sobrante no le
+  // corresponden.
+  const soloAvion = role?.nombre === "gestor_vuelos";
   const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
   const [sociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
   const [comprobantes, setComprobantes] = useLocalStorage<ComprobanteGasto[]>(
@@ -87,8 +93,11 @@ function Comprobacion() {
   // sociedad.
   const solSociedad = sociedades.find((so) => so.nombre === sel?.empresa);
   const rows = useMemo(
-    () => comprobantes.filter((c) => c.solicitud_id === sid),
-    [comprobantes, sid],
+    () =>
+      comprobantes
+        .filter((c) => c.solicitud_id === sid)
+        .filter((c) => !soloAvion || c.concepto === "Avión"),
+    [comprobantes, sid, soloAvion],
   );
   const fs = useMemo(() => facturas.filter((f) => f.solicitud_id === sid), [facturas, sid]);
   const [log, setLog] = useState<string[]>([]);
@@ -209,14 +218,31 @@ function Comprobacion() {
   // Estatus global: comprobado solo cuando el total comprobado iguala al total solicitado.
   const comprobado = totSol > 0 && totComp === totSol;
 
+  // Mismo criterio que "comprobado" arriba, pero para cualquier folio del
+  // listado (no solo el seleccionado) — así el selector puede pintar en
+  // verde los que ya están completos.
+  const estaComprobado = (solicitudId: string) => {
+    const filas = comprobantes
+      .filter((c) => c.solicitud_id === solicitudId)
+      .filter((c) => !soloAvion || c.concepto === "Avión");
+    const tot = filas.reduce((a, r) => a + r.monto_solicitado, 0);
+    const comp = filas.reduce((a, r) => a + r.monto_comprobado, 0);
+    return tot > 0 && comp === tot;
+  };
+
   return (
     <div className="space-y-5">
       <div className="ckl-card p-4">
         <label className="ckl-label">Folio</label>
         <select className="ckl-input max-w-md" value={sid} onChange={(e) => setSid(e.target.value)}>
           {cerradas.map((s) => (
-            <option key={s.id} value={s.id}>
+            <option
+              key={s.id}
+              value={s.id}
+              style={estaComprobado(s.id) ? { color: "#16A34A" } : undefined}
+            >
               {s.folio} — {s.destino_resumen} ({fmtMoney(s.monto_total)})
+              {estaComprobado(s.id) ? " ✓" : ""}
             </option>
           ))}
         </select>
@@ -428,37 +454,39 @@ function Comprobacion() {
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <div className="ckl-card p-4">
-          <div className="text-sm font-semibold">No deducibles</div>
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            <input className="ckl-input" placeholder="Monto" />
-            <input className="ckl-input" placeholder="Establecimiento" />
-            <input className="ckl-input" placeholder="Lugar" />
-          </div>
-          <button className="ckl-btn-outline mt-3" onClick={() => toast.success("Foto adjunta.")}>
-            <Upload size={14} /> Adjuntar foto
-          </button>
-        </div>
-        <div className="ckl-card p-4" style={{ borderLeft: "4px solid var(--color-primary)" }}>
-          <div className="text-sm font-semibold">Depósito sobrante</div>
-          <div
-            className="mt-2 rounded-md p-2 text-xs"
-            style={{ background: "#FEF3C7", color: "#D97706" }}
-          >
-            Es obligatorio reintegrar el sobrante con comprobante bancario.
-          </div>
-          <div className="mt-3 flex gap-2">
-            <input className="ckl-input" placeholder="Monto a reintegrar" />
-            <button
-              className="ckl-btn-primary"
-              onClick={() => toast.success("Comprobante bancario cargado.")}
-            >
-              <Upload size={14} /> Cargar
+      {!soloAvion && (
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div className="ckl-card p-4">
+            <div className="text-sm font-semibold">No deducibles</div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <input className="ckl-input" placeholder="Monto" />
+              <input className="ckl-input" placeholder="Establecimiento" />
+              <input className="ckl-input" placeholder="Lugar" />
+            </div>
+            <button className="ckl-btn-outline mt-3" onClick={() => toast.success("Foto adjunta.")}>
+              <Upload size={14} /> Adjuntar foto
             </button>
           </div>
+          <div className="ckl-card p-4" style={{ borderLeft: "4px solid var(--color-primary)" }}>
+            <div className="text-sm font-semibold">Depósito sobrante</div>
+            <div
+              className="mt-2 rounded-md p-2 text-xs"
+              style={{ background: "#FEF3C7", color: "#D97706" }}
+            >
+              Es obligatorio reintegrar el sobrante con comprobante bancario.
+            </div>
+            <div className="mt-3 flex gap-2">
+              <input className="ckl-input" placeholder="Monto a reintegrar" />
+              <button
+                className="ckl-btn-primary"
+                onClick={() => toast.success("Comprobante bancario cargado.")}
+              >
+                <Upload size={14} /> Cargar
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
