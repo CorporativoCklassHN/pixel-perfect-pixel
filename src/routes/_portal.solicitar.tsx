@@ -31,13 +31,16 @@ type Row = { id: string; tipo: string; monto: number };
 type OtroRow = { id: string; concepto: string; monto: number };
 
 // Una estancia de hotel dentro de un destino. Puede haber varias si el
-// viajero cambia de hotel a mitad del destino.
+// viajero cambia de hotel a mitad del destino. hotel_id identifica el hotel
+// del catálogo elegido, independiente de si el monto es manual o no — así al
+// activar "Monto manual" no se pierde de vista qué hotel se había elegido.
 type HotelStay = {
   id: string;
   fecha_inicio: string;
   fecha_fin: string;
   monto: number;
   manual: boolean;
+  hotel_id: number;
 };
 
 type Destino = {
@@ -52,7 +55,7 @@ type Destino = {
 };
 
 function newHotelStay(fecha_inicio = ""): HotelStay {
-  return { id: uid("h_"), fecha_inicio, fecha_fin: "", monto: 0, manual: false };
+  return { id: uid("h_"), fecha_inicio, fecha_fin: "", monto: 0, manual: false, hotel_id: 0 };
 }
 
 function newDestino(): Destino {
@@ -70,7 +73,7 @@ function newDestino(): Destino {
 function normalizeDestino(raw: any): Destino {
   const hoteles: HotelStay[] =
     Array.isArray(raw.hoteles) && raw.hoteles.length
-      ? raw.hoteles
+      ? raw.hoteles.map((h: any) => ({ ...h, hotel_id: h.hotel_id ?? 0 }))
       : [
           {
             id: uid("h_"),
@@ -78,6 +81,7 @@ function normalizeDestino(raw: any): Destino {
             fecha_fin: raw.fecha_fin ?? "",
             monto: raw.hotel_monto ?? 0,
             manual: raw.hotel_manual ?? false,
+            hotel_id: 0,
           },
         ];
   return {
@@ -133,13 +137,38 @@ function Solicitar() {
     }
   }, [editId, editing, nav]);
 
-  const [folio] = useState(() => editing?.folio ?? nextFolio());
+  // El folio real solo se asigna al guardar (no al abrir el formulario): si se
+  // asignara aquí, dos personas capturando al mismo tiempo verían el mismo
+  // número, y si una de las dos no llega a guardar, ese folio se pierde. Se
+  // calcula con nextFolio() justo antes de escribir en KEYS.solicitudes, así
+  // que refleja lo que exista en ese momento (basado en la hora real de guardado).
+  const [folio, setFolio] = useState<string | null>(() => editing?.folio ?? null);
   const today = new Date().toLocaleDateString("es-MX");
   const todayIso = new Date().toISOString().slice(0, 10);
   const [origen, setOrigen] = useState(() => editing?.origen ?? origenes[0] ?? "");
   const [tipo, setTipo] = useState(() => editing?.tipo_viaje ?? TIPOS[0]);
-  const [personas, setPersonas] = useState(() => editing?.personas_count ?? 1);
-  const [nombres, setNombres] = useState(() => editing?.personas_nombres ?? user?.nombre ?? "");
+  const [personas, setPersonasCount] = useState(() => editing?.personas_count ?? 1);
+  // Un input por viajero (en vez de un solo texto libre) para que capturar
+  // varios nombres no dependa de que el usuario use un separador consistente.
+  const [nombresArr, setNombresArr] = useState<string[]>(() => {
+    const inicial = editing?.personas_nombres ?? user?.nombre ?? "";
+    const partes = inicial
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const base = partes.length ? partes : [inicial];
+    const count = editing?.personas_count ?? 1;
+    return Array.from({ length: count }, (_, i) => base[i] ?? "");
+  });
+  const setPersonas = (n: number) => {
+    const count = Math.max(1, n);
+    setPersonasCount(count);
+    setNombresArr((arr) => {
+      const next = arr.slice(0, count);
+      while (next.length < count) next.push("");
+      return next;
+    });
+  };
   const [motivo, setMotivo] = useState(() => editing?.motivo ?? "");
   const [destinos, setDestinos] = useState<Destino[]>(() => {
     if (!editing) return [newDestino()];
@@ -155,9 +184,10 @@ function Solicitar() {
     let foraneo = 0, local = 0, otros = 0, hotel = 0, diasTot = 0;
     for (const d of destinos) {
       for (const h of d.hoteles) {
+        // El monto (venga del catálogo o sea manual) siempre es la tarifa por
+        // noche: se multiplica por las noches de esa estancia.
         const tarifa = Number(h.monto) || 0;
-        // Si no es monto manual, monto es la tarifa por noche: se multiplica por las noches de esa estancia.
-        hotel += h.manual ? tarifa : tarifa * nightsBetween(h.fecha_inicio, h.fecha_fin);
+        hotel += tarifa * nightsBetween(h.fecha_inicio, h.fecha_fin);
       }
       foraneo += d.foraneo.reduce((a, r) => a + (Number(r.monto) || 0), 0);
       local += d.local.reduce((a, r) => a + (Number(r.monto) || 0), 0);
@@ -239,6 +269,11 @@ function Solicitar() {
     }
     const resumen = destinos.map((d) => d.estado).join(" - ");
     const solId = editing?.id ?? uid("s_");
+    // Se calcula justo aquí, al momento real de guardar (no al abrir el
+    // formulario), para que el número refleje lo último persistido en ese
+    // instante y no se repita entre dos personas capturando a la vez.
+    const folioFinal = editing?.folio ?? nextFolio();
+    const nombres = nombresArr.map((n) => n.trim()).filter(Boolean).join(", ");
 
     const sol: Solicitud = editing
       ? {
@@ -251,7 +286,7 @@ function Solicitar() {
           finanzas_status: requiresFin ? "Pendiente" : "N/A",
         }
       : {
-          id: solId, folio, user_id: user!.id, fecha: today,
+          id: solId, folio: folioFinal, user_id: user!.id, fecha: today,
           empresa: user!.empresa, origen,
           destino_resumen: `${origen} - ${resumen}`,
           tipo_viaje: tipo, motivo,
@@ -316,7 +351,10 @@ function Solicitar() {
     ];
     lsSet(KEYS.comprobantesGasto, [...cg, ...newCg]);
 
-    toast.success(editing ? `Solicitud ${folio} actualizada.` : `Solicitud ${folio} registrada.`);
+    setFolio(folioFinal);
+    toast.success(
+      editing ? `Solicitud ${folioFinal} actualizada.` : `Solicitud ${folioFinal} registrada.`,
+    );
     setShowModal(true);
   };
 
@@ -347,7 +385,12 @@ function Solicitar() {
           <h2 className="text-base font-semibold">
             {editing ? "Editar solicitud" : "Datos generales"}
           </h2>
-          <span className="ckl-badge" style={{ background: "var(--color-primary-soft)", color: "var(--color-primary)" }}>Folio {folio}</span>
+          <span
+            className="ckl-badge"
+            style={{ background: "var(--color-primary-soft)", color: "var(--color-primary)" }}
+          >
+            {folio ? `Folio ${folio}` : "Folio: se asigna al guardar"}
+          </span>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <Field label="Fecha"><input className="ckl-input" value={today} readOnly /></Field>
@@ -363,10 +406,25 @@ function Solicitar() {
             </select>
           </Field>
           <Field label="No. de personas">
-            <input type="number" min={1} className="ckl-input" value={personas} onChange={(e) => setPersonas(Math.max(1, +e.target.value))} />
+            <input type="number" min={1} className="ckl-input" value={personas} onChange={(e) => setPersonas(+e.target.value)} />
           </Field>
-          <Field label="Nombres de viajeros">
-            <input className="ckl-input" value={nombres} onChange={(e) => setNombres(e.target.value)} />
+          <Field
+            label={personas > 1 ? "Nombres de viajeros" : "Nombre del viajero"}
+            className={personas > 1 ? "md:col-span-2" : ""}
+          >
+            <div className="space-y-2">
+              {nombresArr.map((n, i) => (
+                <input
+                  key={i}
+                  className="ckl-input"
+                  value={n}
+                  onChange={(e) =>
+                    setNombresArr((arr) => arr.map((x, idx) => (idx === i ? e.target.value : x)))
+                  }
+                  placeholder={personas > 1 ? `Viajero ${i + 1}` : "Nombre completo"}
+                />
+              ))}
+            </div>
           </Field>
           <Field label="Motivo" className="md:col-span-3">
             <textarea className="ckl-input min-h-[72px]" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Describe el objetivo del viaje..." />
@@ -552,7 +610,10 @@ function DestinoBlock({
           className="ckl-input max-w-[180px]"
           value={d.estado}
           onChange={(e) =>
-            onChange({ estado: e.target.value, hoteles: d.hoteles.map((h) => ({ ...h, monto: 0 })) })
+            onChange({
+              estado: e.target.value,
+              hoteles: d.hoteles.map((h) => ({ ...h, monto: 0, hotel_id: 0 })),
+            })
           }
         >
           {ESTADOS.map((s) => <option key={s}>{s}</option>)}
@@ -613,26 +674,23 @@ function DestinoBlock({
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs font-semibold text-muted-foreground">Hotel:</span>
                   <div className="min-w-[200px] flex-1">
-                    {!h.manual ? (
-                      <select
-                        className="ckl-input"
-                        value={h.monto}
-                        onChange={(e) => updateHotel(h.id, { monto: +e.target.value })}
-                      >
-                        <option value={0}>— Seleccionar —</option>
-                        {filteredHotels.map((ho) => (
-                          <option key={ho.id} value={ho.tarifa_base}>{ho.nombre} — {fmtMoney(ho.tarifa_base)}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type="number"
-                        className="ckl-input"
-                        value={h.monto}
-                        onChange={(e) => updateHotel(h.id, { monto: +e.target.value })}
-                        placeholder="Monto manual"
-                      />
-                    )}
+                    <select
+                      className="ckl-input"
+                      value={h.hotel_id}
+                      onChange={(e) => {
+                        const hotel_id = +e.target.value;
+                        const chosen = filteredHotels.find((ho) => ho.id === hotel_id);
+                        updateHotel(h.id, {
+                          hotel_id,
+                          monto: h.manual ? h.monto : (chosen?.tarifa_base ?? 0),
+                        });
+                      }}
+                    >
+                      <option value={0}>— Seleccionar —</option>
+                      {filteredHotels.map((ho) => (
+                        <option key={ho.id} value={ho.id}>{ho.nombre} — {fmtMoney(ho.tarifa_base)}</option>
+                      ))}
+                    </select>
                   </div>
                   <DateField
                     className="max-w-[150px]"
@@ -677,15 +735,27 @@ function DestinoBlock({
                     </button>
                   )}
                 </div>
-                <label className="mt-2 inline-flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={h.manual}
-                    onChange={(e) => updateHotel(h.id, { manual: e.target.checked, monto: 0 })}
-                  />
-                  Monto manual
-                </label>
-                {!h.manual && h.monto > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <label className="inline-flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={h.manual}
+                      onChange={(e) => updateHotel(h.id, { manual: e.target.checked })}
+                    />
+                    Monto manual por noche
+                  </label>
+                  {h.manual && (
+                    <input
+                      type="number"
+                      className="ckl-input max-w-[140px]"
+                      value={h.monto}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => updateHotel(h.id, { monto: +e.target.value })}
+                      placeholder="Monto por noche"
+                    />
+                  )}
+                </div>
+                {h.monto > 0 && (
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     {hNights} noche(s) × {fmtMoney(h.monto)} = <b>{fmtMoney(hNights * h.monto)}</b>
                   </p>
@@ -720,7 +790,14 @@ function RowsSection({ title, medios, rows, onChange }: { title: string; medios:
             <select className="ckl-input max-w-[160px]" value={r.tipo} onChange={(e) => onChange(rows.map((x) => x.id === r.id ? { ...x, tipo: e.target.value } : x))}>
               {medios.map((m) => <option key={m}>{m}</option>)}
             </select>
-            <input type="number" placeholder="Monto" className="ckl-input" value={r.monto} onChange={(e) => onChange(rows.map((x) => x.id === r.id ? { ...x, monto: +e.target.value } : x))} />
+            <input
+              type="number"
+              placeholder="Monto"
+              className="ckl-input"
+              value={r.monto}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => onChange(rows.map((x) => x.id === r.id ? { ...x, monto: +e.target.value } : x))}
+            />
             <button onClick={() => onChange(rows.filter((x) => x.id !== r.id))} className="ckl-btn-ghost"><X size={14} /></button>
           </div>
         ))}
@@ -744,7 +821,14 @@ function OtrosSection({ rows, onChange }: { rows: OtroRow[]; onChange: (r: OtroR
         {rows.map((r) => (
           <div key={r.id} className="flex gap-2">
             <input placeholder="Concepto" className="ckl-input" value={r.concepto} onChange={(e) => onChange(rows.map((x) => x.id === r.id ? { ...x, concepto: e.target.value } : x))} />
-            <input type="number" placeholder="Monto" className="ckl-input max-w-[160px]" value={r.monto} onChange={(e) => onChange(rows.map((x) => x.id === r.id ? { ...x, monto: +e.target.value } : x))} />
+            <input
+              type="number"
+              placeholder="Monto"
+              className="ckl-input max-w-[160px]"
+              value={r.monto}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => onChange(rows.map((x) => x.id === r.id ? { ...x, monto: +e.target.value } : x))}
+            />
             <button onClick={() => onChange(rows.filter((x) => x.id !== r.id))} className="ckl-btn-ghost"><X size={14} /></button>
           </div>
         ))}

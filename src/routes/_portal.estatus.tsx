@@ -34,6 +34,7 @@ type HotelStayStored = {
   fecha_fin: string;
   monto: number;
   manual: boolean;
+  hotel_id?: number;
 };
 type RowStored = { id: string; tipo: string; monto: number };
 type OtroRowStored = { id: string; concepto: string; monto: number };
@@ -61,11 +62,13 @@ function nightsBetween(a: string, b: string) {
   return Math.max(0, daysBetween(a, b) - 1);
 }
 
-// El select de hotel en "Solicitar viáticos" guarda la tarifa (monto), no el id
-// del hotel — se resuelve el nombre buscando en el catálogo un hotel del mismo
-// estado con esa tarifa. Si no hay match (tarifa cambió, monto manual) se
-// muestra una etiqueta genérica en vez de fallar.
+// Preferimos hotel_id (el hotel elegido, exista o no un monto manual encima).
+// Solicitudes guardadas antes de que existiera ese campo solo tienen la
+// tarifa: se busca en el catálogo un hotel del mismo estado con esa tarifa
+// como respaldo, y si tampoco hay match se muestra una etiqueta genérica.
 function resolveHotelName(h: HotelStayStored, estado: string, catalogo: Hotel[]) {
+  const porId = h.hotel_id ? catalogo.find((ho) => ho.id === h.hotel_id) : undefined;
+  if (porId) return porId.nombre;
   if (h.manual) return "Monto manual";
   const match = catalogo.find((ho) => ho.estado === estado && ho.tarifa_base === h.monto);
   return match?.nombre ?? "Hotel";

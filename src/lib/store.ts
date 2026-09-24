@@ -276,6 +276,12 @@ const SEED_SOLICITUDES: Solicitud[] = [
   // Sofía Ramírez (TRANSPORTES DE PERSONAL Y MERCANCIA): una pendiente y una ya cerrada.
   { id: "s14", folio: "#0049", user_id: "u8", fecha: "12/09/2026", empresa: "TRANSPORTES DE PERSONAL Y MERCANCIA", origen: "Guadalajara", destino_resumen: "GDL - Monterrey", tipo_viaje: "Comercial", motivo: "Negociación de contrato con cliente transportista", personas_count: 1, personas_nombres: "S. Ramírez", monto_total: 5800, jefe_status: "Pendiente", finanzas_status: "Pendiente", estatus: "Abierto", comprobante_viaje: null, created_at: "2026-09-12" },
   { id: "s15", folio: "#0050", user_id: "u8", fecha: "14/09/2026", empresa: "TRANSPORTES DE PERSONAL Y MERCANCIA", origen: "Guadalajara", destino_resumen: "GDL - Querétaro", tipo_viaje: "Visita a tiendas", motivo: "Supervisión de operación logística en centro de distribución", personas_count: 1, personas_nombres: "S. Ramírez", monto_total: 3100, jefe_status: "Autorizado", finanzas_status: "N/A", estatus: "Cerrado", comprobante_viaje: "21/09/2026", created_at: "2026-09-14" },
+  // Cerradas y con comprobación 100% pendiente, para probar los íconos de
+  // adjuntar XML/PDF por concepto (las demás de arriba ya se fueron
+  // comprobando durante pruebas anteriores).
+  { id: "s16", folio: "#0060", user_id: "u3", fecha: "16/09/2026", empresa: "WATA GROUP", origen: "Guadalajara", destino_resumen: "GDL - Zacatecas", tipo_viaje: "Visita a tiendas", motivo: "Supervisión de inventario en tienda Zacatecas", personas_count: 1, personas_nombres: "M. Torres", monto_total: 4600, jefe_status: "Autorizado", finanzas_status: "N/A", estatus: "Cerrado", comprobante_viaje: "23/09/2026", created_at: "2026-09-16" },
+  { id: "s17", folio: "#0061", user_id: "u7", fecha: "17/09/2026", empresa: "INTERMEDIARIA INTERMEX", origen: "Guadalajara", destino_resumen: "GDL - Monterrey", tipo_viaje: "Comercial", motivo: "Cierre de contrato con cliente en Monterrey", personas_count: 1, personas_nombres: "C. Mendoza", monto_total: 6800, jefe_status: "Autorizado", finanzas_status: "Autorizado", estatus: "Cerrado", comprobante_viaje: "24/09/2026", created_at: "2026-09-17" },
+  { id: "s18", folio: "#0062", user_id: "u8", fecha: "18/09/2026", empresa: "TRANSPORTES DE PERSONAL Y MERCANCIA", origen: "Guadalajara", destino_resumen: "GDL - CDMX", tipo_viaje: "Comercial", motivo: "Reunión con cliente de logística en CDMX", personas_count: 1, personas_nombres: "S. Ramírez", monto_total: 3900, jefe_status: "Autorizado", finanzas_status: "N/A", estatus: "Cerrado", comprobante_viaje: "25/09/2026", created_at: "2026-09-18" },
 ];
 
 const SEED_AUTORIZACIONES: Autorizacion[] = [
@@ -290,6 +296,10 @@ const SEED_AUTORIZACIONES: Autorizacion[] = [
   { id: "a9", solicitud_id: "s11", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "rechazado", fecha: "2026-09-04", nota: "Motivo de viaje insuficientemente justificado." },
   { id: "a10", solicitud_id: "s13", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-09-06", nota: "" },
   { id: "a11", solicitud_id: "s15", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-09-15", nota: "" },
+  { id: "a12", solicitud_id: "s16", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-09-17", nota: "" },
+  { id: "a13", solicitud_id: "s17", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-09-18", nota: "" },
+  { id: "a14", solicitud_id: "s17", rol_autorizador: "finanzas", user_id: "u4", status: "autorizado", fecha: "2026-09-18", nota: "" },
+  { id: "a15", solicitud_id: "s18", rol_autorizador: "jefe_inmediato", user_id: "u2", status: "autorizado", fecha: "2026-09-19", nota: "" },
 ];
 
 const SEED_COMPROBANTES: ComprobanteGasto[] = [
@@ -435,6 +445,30 @@ const SEED_DESTINOS_DETALLE = [
     local: [{ id: "rl_s15", tipo: "Uber", monto: 298 }],
     otros: [{ id: "ro_s15", concepto: "Imprevistos", monto: 444 }],
   },
+  {
+    id: "dd_s16", solicitud_id: "s16", estado: "Zacatecas",
+    fecha_inicio: "2026-09-19", fecha_fin: "2026-09-21",
+    hoteles: [{ id: "hh_s16", fecha_inicio: "2026-09-19", fecha_fin: "2026-09-21", monto: 890, manual: false }],
+    foraneo: [{ id: "rf_s16", tipo: "Autobús", monto: 1288 }],
+    local: [{ id: "rl_s16", tipo: "Uber", monto: 442 }],
+    otros: [{ id: "ro_s16", concepto: "Imprevistos", monto: 170 }],
+  },
+  {
+    id: "dd_s17", solicitud_id: "s17", estado: "Nuevo León",
+    fecha_inicio: "2026-09-20", fecha_fin: "2026-09-22",
+    hoteles: [{ id: "hh_s17", fecha_inicio: "2026-09-20", fecha_fin: "2026-09-22", monto: 1150, manual: false }],
+    foraneo: [{ id: "rf_s17", tipo: "Avión", monto: 1904 }],
+    local: [{ id: "rl_s17", tipo: "Uber", monto: 653 }],
+    otros: [{ id: "ro_s17", concepto: "Regalos para cliente", monto: 583 }],
+  },
+  {
+    id: "dd_s18", solicitud_id: "s18", estado: "CDMX",
+    fecha_inicio: "2026-09-21", fecha_fin: "2026-09-23",
+    hoteles: [{ id: "hh_s18", fecha_inicio: "2026-09-21", fecha_fin: "2026-09-23", monto: 680, manual: false }],
+    foraneo: [{ id: "rf_s18", tipo: "Avión", monto: 1092 }],
+    local: [{ id: "rl_s18", tipo: "Uber", monto: 374 }],
+    otros: [{ id: "ro_s18", concepto: "Imprevistos", monto: 294 }],
+  },
 ];
 
 // Renglones de comprobación para las solicitudes sembradas que aún no tenían
@@ -507,6 +541,21 @@ const SEED_COMPROBANTES_DETALLE: ComprobanteGasto[] = [
   { id: "cgd_s15_3", solicitud_id: "s15", concepto: "Transporte local", monto_solicitado: 298, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s15_4", solicitud_id: "s15", concepto: "Comida", monto_solicitado: 620, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s15_5", solicitud_id: "s15", concepto: "Otros", monto_solicitado: 444, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s16_1", solicitud_id: "s16", concepto: "Hotel", monto_solicitado: 1780, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s16_2", solicitud_id: "s16", concepto: "Transporte foráneo", monto_solicitado: 1288, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s16_3", solicitud_id: "s16", concepto: "Transporte local", monto_solicitado: 442, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s16_4", solicitud_id: "s16", concepto: "Comida", monto_solicitado: 920, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s16_5", solicitud_id: "s16", concepto: "Otros", monto_solicitado: 170, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s17_1", solicitud_id: "s17", concepto: "Hotel", monto_solicitado: 2300, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s17_2", solicitud_id: "s17", concepto: "Transporte foráneo", monto_solicitado: 1904, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s17_3", solicitud_id: "s17", concepto: "Transporte local", monto_solicitado: 653, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s17_4", solicitud_id: "s17", concepto: "Comida", monto_solicitado: 1360, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s17_5", solicitud_id: "s17", concepto: "Otros", monto_solicitado: 583, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s18_1", solicitud_id: "s18", concepto: "Hotel", monto_solicitado: 1360, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s18_2", solicitud_id: "s18", concepto: "Transporte foráneo", monto_solicitado: 1092, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s18_3", solicitud_id: "s18", concepto: "Transporte local", monto_solicitado: 374, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s18_4", solicitud_id: "s18", concepto: "Comida", monto_solicitado: 780, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s18_5", solicitud_id: "s18", concepto: "Otros", monto_solicitado: 294, monto_comprobado: 0, status_renglon: "pendiente" },
 ];
 
 const SEED_CONFIG = {
@@ -560,6 +609,44 @@ export function initSeed() {
   backfillAutomationsConfig();
   backfillDestinoDetalle();
   backfillEmpleadosMultiSociedad();
+  backfillEscenariosComprobacion();
+  backfillFolioCollisions();
+}
+
+// Los folios de ejemplo (SEED_SOLICITUDES) usan números fijos elegidos al
+// escribir el código, sin saber qué folio real ya le había asignado
+// nextFolio() a una solicitud capturada por el usuario en ese navegador antes
+// de que ese lote de ejemplos llegara — por eso pueden chocar (mismo folio,
+// dos solicitudes distintas). Se corre al final de todo backfill: si un folio
+// se repite, se renumera la copia de ejemplo (nunca la real del usuario, que
+// no tiene un id de los sembrados) al siguiente número libre.
+function backfillFolioCollisions() {
+  const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
+  const seedIds = new Set(SEED_SOLICITUDES.map((s) => s.id));
+  const folioCount: Record<string, number> = {};
+  for (const s of solicitudes) folioCount[s.folio] = (folioCount[s.folio] ?? 0) + 1;
+  const usados = new Set(solicitudes.map((s) => s.folio));
+
+  let n = 63;
+  const siguienteLibre = () => {
+    let candidato = `#${String(n).padStart(4, "0")}`;
+    while (usados.has(candidato)) {
+      n++;
+      candidato = `#${String(n).padStart(4, "0")}`;
+    }
+    usados.add(candidato);
+    return candidato;
+  };
+
+  let changed = false;
+  const next = solicitudes.map((s) => {
+    if (folioCount[s.folio] > 1 && seedIds.has(s.id)) {
+      changed = true;
+      return { ...s, folio: siguienteLibre() };
+    }
+    return s;
+  });
+  if (changed) lsSet(KEYS.solicitudes, next);
 }
 
 // Empleados de ejemplo (rol "usuario") en las otras dos sociedades — antes
@@ -583,6 +670,24 @@ function backfillEmpleadosMultiSociedad() {
   const autorizaciones = lsGet<Autorizacion[]>(KEYS.autorizaciones, []);
   const faltanAut = SEED_AUTORIZACIONES.filter(
     (a) => ["a10", "a11"].includes(a.id) && !autorizaciones.some((x) => x.id === a.id),
+  );
+  if (faltanAut.length) lsSet(KEYS.autorizaciones, [...autorizaciones, ...faltanAut]);
+}
+
+// Folios Cerrados con comprobación 100% pendiente, para poder probar los
+// íconos de adjuntar XML/PDF por concepto — los folios sembrados antes se
+// fueron comprobando durante pruebas y ya no muestran esos íconos.
+function backfillEscenariosComprobacion() {
+  const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
+  const idsNuevos = ["s16", "s17", "s18"];
+  const faltanSolicitudes = SEED_SOLICITUDES.filter(
+    (s) => idsNuevos.includes(s.id) && !solicitudes.some((x) => x.id === s.id),
+  );
+  if (faltanSolicitudes.length) lsSet(KEYS.solicitudes, [...faltanSolicitudes, ...solicitudes]);
+
+  const autorizaciones = lsGet<Autorizacion[]>(KEYS.autorizaciones, []);
+  const faltanAut = SEED_AUTORIZACIONES.filter(
+    (a) => ["a12", "a13", "a14", "a15"].includes(a.id) && !autorizaciones.some((x) => x.id === a.id),
   );
   if (faltanAut.length) lsSet(KEYS.autorizaciones, [...autorizaciones, ...faltanAut]);
 }

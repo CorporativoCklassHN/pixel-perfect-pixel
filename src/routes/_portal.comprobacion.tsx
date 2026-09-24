@@ -1,10 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Upload, FileText, FileCode, Edit2, Trash2 } from "lucide-react";
+import { Upload, FileText, FileCode, Trash2, Eye, Download } from "lucide-react";
 import { toast } from "sonner";
 import { useLocalStorage } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
-import { KEYS, fmtMoney, uid, type Solicitud, type ComprobanteGasto, type Sociedad } from "@/lib/store";
+import {
+  KEYS,
+  fmtMoney,
+  uid,
+  type Solicitud,
+  type ComprobanteGasto,
+  type Sociedad,
+} from "@/lib/store";
 
 export const Route = createFileRoute("/_portal/comprobacion")({
   head: () => ({ meta: [{ title: "Comprobación — CKL" }] }),
@@ -24,12 +31,53 @@ type Factura = {
   // (puede ser menor a `total` si el renglón se saturó). Permite revertir exacto al eliminar.
   concepto_id: string | null;
   monto_aplicado: number;
+  // Data URL (base64) del archivo, para poder verlo/descargarlo después sin
+  // pedirlo de nuevo — localStorage no puede guardar un File/Blob tal cual.
+  contenido: string;
 };
+
+function readAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(",");
+  const mime = header.match(/:(.*?);/)?.[1] ?? "application/octet-stream";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+// Chrome bloquea window.open() directo a una URL data: (medida anti-phishing).
+// Se convierte a un Blob URL, que sí se puede abrir/descargar sin problema.
+function verFactura(f: Factura) {
+  const url = URL.createObjectURL(dataUrlToBlob(f.contenido));
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+function descargarFactura(f: Factura) {
+  const url = URL.createObjectURL(dataUrlToBlob(f.contenido));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = f.archivo;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 
 function Comprobacion() {
   const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
   const [sociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
-  const [comprobantes, setComprobantes] = useLocalStorage<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  const [comprobantes, setComprobantes] = useLocalStorage<ComprobanteGasto[]>(
+    KEYS.comprobantesGasto,
+    [],
+  );
   const [facturas, setFacturas] = useLocalStorage<Factura[]>(KEYS.facturasXml, []);
   const cerradas = solicitudes.filter((s) => s.estatus === "Cerrado");
   const [sid, setSid] = useState<string>(cerradas[0]?.id ?? "");
@@ -38,13 +86,21 @@ function Comprobacion() {
   // viático, no a su propio RFC personal — el Receptor del CFDI debe ser esa
   // sociedad.
   const solSociedad = sociedades.find((so) => so.nombre === sel?.empresa);
-  const rows = useMemo(() => comprobantes.filter((c) => c.solicitud_id === sid), [comprobantes, sid]);
+  const rows = useMemo(
+    () => comprobantes.filter((c) => c.solicitud_id === sid),
+    [comprobantes, sid],
+  );
   const fs = useMemo(() => facturas.filter((f) => f.solicitud_id === sid), [facturas, sid]);
   const [log, setLog] = useState<string[]>([]);
 
-  const addLog = (line: string) => setLog((l) => [`${new Date().toTimeString().slice(0, 8)} ${line}`, ...l].slice(0, 50));
+  const addLog = (line: string) =>
+    setLog((l) => [`${new Date().toTimeString().slice(0, 8)} ${line}`, ...l].slice(0, 50));
 
-  const onFile = (kind: "XML" | "PDF") => {
+  // El renglón a comprobar (concepto) se recibe explícito desde el botón que
+  // se presionó en esa fila de la tabla — ya no se adivina tomando "el primer
+  // renglón pendiente", que podía aplicar una factura de hotel al concepto
+  // de transporte por simple coincidencia de orden.
+  const onFile = (kind: "XML" | "PDF", concepto: ComprobanteGasto) => {
     const inp = document.createElement("input");
     inp.type = "file";
     inp.accept = kind === "XML" ? ".xml" : ".pdf,.jpg,.png";
@@ -56,9 +112,9 @@ function Comprobacion() {
         showErrorDialog(`El archivo "${file.name}" ya fue cargado para esta solicitud.`);
         return;
       }
-      let total = Math.floor(Math.random() * 800) + 200;
+      const total = Math.floor(Math.random() * 800) + 200;
       let status: "Verificado" | "Error" = "Verificado";
-      let uuidv = uid("UUID-").toUpperCase();
+      const uuidv = uid("UUID-").toUpperCase();
       if (kind === "XML") {
         const text = await file.text();
         if (!text.includes("cfdi:Emisor") && !text.toLowerCase().includes("emisor")) {
@@ -71,44 +127,46 @@ function Comprobacion() {
             addLog(`✖ RFC del Receptor no coincide (esperado: ${rfcEsperado})`);
             status = "Error";
           } else {
-            addLog(`✔ XML verificado CFDI 4.0. UUID: ${uuidv}`);
+            addLog(`✔ XML verificado CFDI 4.0 para "${concepto.concepto}". UUID: ${uuidv}`);
           }
         }
       } else {
-        addLog(`✔ PDF cargado: ${file.name}`);
+        addLog(`✔ PDF cargado para "${concepto.concepto}": ${file.name}`);
       }
-      let conceptoId: string | null = null;
       let montoAplicado = 0;
       if (status === "Verificado") {
-        // Increase a hotel/other to simulate
-        const pendiente = rows.find((r) => r.status_renglon !== "comprobado");
-        if (pendiente) {
-          conceptoId = pendiente.id;
-          montoAplicado = Math.min(total, pendiente.monto_solicitado - pendiente.monto_comprobado);
-          setComprobantes(
-            comprobantes.map((c) =>
-              c.id === pendiente.id
-                ? {
-                    ...c,
-                    monto_comprobado: c.monto_comprobado + montoAplicado,
-                    status_renglon:
-                      c.monto_comprobado + montoAplicado >= c.monto_solicitado
-                        ? "comprobado"
-                        : "parcialmente_comprobado",
-                  }
-                : c,
-            ),
-          );
-        }
-        toast.success("Comprobante cargado y verificado.");
+        montoAplicado = Math.min(total, concepto.monto_solicitado - concepto.monto_comprobado);
+        setComprobantes(
+          comprobantes.map((c) =>
+            c.id === concepto.id
+              ? {
+                  ...c,
+                  monto_comprobado: c.monto_comprobado + montoAplicado,
+                  status_renglon:
+                    c.monto_comprobado + montoAplicado >= c.monto_solicitado
+                      ? "comprobado"
+                      : "parcialmente_comprobado",
+                }
+              : c,
+          ),
+        );
+        toast.success(`Comprobante de "${concepto.concepto}" cargado y verificado.`);
       } else {
         showErrorDialog("Error de validación. Revisa el log.");
       }
+      const contenido = await readAsDataURL(file);
       const factura: Factura = {
-        id: uid("f_"), solicitud_id: sid, tipo: kind,
+        id: uid("f_"),
+        solicitud_id: sid,
+        tipo: kind,
         fecha: new Date().toLocaleDateString("es-MX"),
-        uuid: uuidv, archivo: file.name, total, status,
-        concepto_id: conceptoId, monto_aplicado: montoAplicado,
+        uuid: uuidv,
+        archivo: file.name,
+        total,
+        status,
+        concepto_id: concepto.id,
+        monto_aplicado: montoAplicado,
+        contenido,
       };
       setFacturas([factura, ...facturas]);
     };
@@ -119,20 +177,32 @@ function Comprobacion() {
     const f = facturas.find((x) => x.id === id);
     setFacturas(facturas.filter((x) => x.id !== id));
     if (f?.concepto_id && f.monto_aplicado > 0) {
-      setComprobantes(comprobantes.map((c) => {
-        if (c.id !== f.concepto_id) return c;
-        const nuevo = Math.max(0, c.monto_comprobado - f.monto_aplicado);
-        return {
-          ...c,
-          monto_comprobado: nuevo,
-          status_renglon: nuevo <= 0 ? "pendiente" : nuevo >= c.monto_solicitado ? "comprobado" : "parcialmente_comprobado",
-        };
-      }));
+      setComprobantes(
+        comprobantes.map((c) => {
+          if (c.id !== f.concepto_id) return c;
+          const nuevo = Math.max(0, c.monto_comprobado - f.monto_aplicado);
+          return {
+            ...c,
+            monto_comprobado: nuevo,
+            status_renglon:
+              nuevo <= 0
+                ? "pendiente"
+                : nuevo >= c.monto_solicitado
+                  ? "comprobado"
+                  : "parcialmente_comprobado",
+          };
+        }),
+      );
     }
     toast.success("Factura eliminada.");
   };
 
-  if (!sel) return <div className="ckl-card p-8 text-center text-sm text-muted-foreground">No hay solicitudes cerradas para comprobar.</div>;
+  if (!sel)
+    return (
+      <div className="ckl-card p-8 text-center text-sm text-muted-foreground">
+        No hay solicitudes cerradas para comprobar.
+      </div>
+    );
 
   const totSol = rows.reduce((a, r) => a + r.monto_solicitado, 0);
   const totComp = rows.reduce((a, r) => a + r.monto_comprobado, 0);
@@ -144,71 +214,134 @@ function Comprobacion() {
       <div className="ckl-card p-4">
         <label className="ckl-label">Folio</label>
         <select className="ckl-input max-w-md" value={sid} onChange={(e) => setSid(e.target.value)}>
-          {cerradas.map((s) => <option key={s.id} value={s.id}>{s.folio} — {s.destino_resumen} ({fmtMoney(s.monto_total)})</option>)}
+          {cerradas.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.folio} — {s.destino_resumen} ({fmtMoney(s.monto_total)})
+            </option>
+          ))}
         </select>
-        <div className="mt-2 text-xs text-muted-foreground">{sel.empresa} · {sel.tipo_viaje} · {sel.fecha}</div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          {sel.empresa} · {sel.tipo_viaje} · {sel.fecha}
+        </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        {/* Tabla */}
-        <div className="ckl-card overflow-hidden">
-          <div className="flex items-center justify-between border-b p-4">
-            <span className="text-sm font-semibold">Tabla de comprobación</span>
-            <span
-              className="ckl-badge"
-              style={{ background: comprobado ? "#D8F3DC" : "#FEF3C7", color: comprobado ? "#2D6A4F" : "#B45309" }}
-            >
-              {comprobado ? "Comprobado" : "Pendiente de comprobar"}
-            </span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-secondary text-left text-xs text-muted-foreground">
-                <tr><th className="p-3">Concepto</th><th className="p-3 text-right">Solicitado</th><th className="p-3 text-right">Comprobado</th><th className="p-3 text-right">Dif.</th><th className="p-3">Estatus</th></tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
-                  const dif = r.monto_comprobado - r.monto_solicitado;
-                  const bg: Record<string, string> = { comprobado: "#D8F3DC", parcialmente_comprobado: "#DBEAFE", pendiente: "#FEF3C7", no_aplica: "#F1F3F5" };
-                  const fg: Record<string, string> = { comprobado: "#2D6A4F", parcialmente_comprobado: "#1D4ED8", pendiente: "#B45309", no_aplica: "#666" };
-                  return (
-                    <tr key={r.id} className="border-t">
-                      <td className="p-3">{r.concepto}</td>
-                      <td className="p-3 text-right">{fmtMoney(r.monto_solicitado)}</td>
-                      <td className="p-3 text-right">{fmtMoney(r.monto_comprobado)}</td>
-                      <td className="p-3 text-right font-semibold" style={{ color: dif < 0 ? "#E30613" : "#2D6A4F" }}>{fmtMoney(dif)}</td>
-                      <td className="p-3"><span className="ckl-badge" style={{ background: bg[r.status_renglon], color: fg[r.status_renglon] }}>{r.status_renglon.replace(/_/g, " ")}</span></td>
-                    </tr>
-                  );
-                })}
-                <tr className="border-t bg-secondary font-semibold">
-                  <td className="p-3">Totales</td>
-                  <td className="p-3 text-right">{fmtMoney(totSol)}</td>
-                  <td className="p-3 text-right">{fmtMoney(totComp)}</td>
-                  <td className="p-3 text-right">{fmtMoney(totComp - totSol)}</td>
-                  <td></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+      {/* Tabla */}
+      <div className="ckl-card overflow-hidden">
+        <div className="flex items-center justify-between border-b p-4">
+          <span className="text-sm font-semibold">Tabla de comprobación</span>
+          <span
+            className="ckl-badge"
+            style={{
+              background: comprobado ? "#D8F3DC" : "#FEF3C7",
+              color: comprobado ? "#2D6A4F" : "#B45309",
+            }}
+          >
+            {comprobado ? "Comprobado" : "Pendiente de comprobar"}
+          </span>
         </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-secondary text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="p-3">Concepto</th>
+                <th className="p-3 text-right">Solicitado</th>
+                <th className="p-3 text-right">Comprobado</th>
+                <th className="p-3 text-right">Dif.</th>
+                <th className="p-3">Estatus</th>
+                <th className="p-3">Adjuntar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const dif = r.monto_comprobado - r.monto_solicitado;
+                const bg: Record<string, string> = {
+                  comprobado: "#D8F3DC",
+                  parcialmente_comprobado: "#DBEAFE",
+                  pendiente: "#FEF3C7",
+                  no_aplica: "#F1F3F5",
+                };
+                const fg: Record<string, string> = {
+                  comprobado: "#2D6A4F",
+                  parcialmente_comprobado: "#1D4ED8",
+                  pendiente: "#B45309",
+                  no_aplica: "#666",
+                };
+                const cerrado =
+                  r.status_renglon === "comprobado" || r.status_renglon === "no_aplica";
+                return (
+                  <tr key={r.id} className="border-t">
+                    <td className="p-3">{r.concepto}</td>
+                    <td className="p-3 text-right">{fmtMoney(r.monto_solicitado)}</td>
+                    <td className="p-3 text-right">{fmtMoney(r.monto_comprobado)}</td>
+                    <td
+                      className="p-3 text-right font-semibold"
+                      style={{ color: dif < 0 ? "#E30613" : "#2D6A4F" }}
+                    >
+                      {fmtMoney(dif)}
+                    </td>
+                    <td className="p-3">
+                      <span
+                        className="ckl-badge"
+                        style={{ background: bg[r.status_renglon], color: fg[r.status_renglon] }}
+                      >
+                        {r.status_renglon.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      {cerrado ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        <div className="flex gap-1">
+                          <button
+                            title={`Adjuntar XML para ${r.concepto}`}
+                            onClick={() => onFile("XML", r)}
+                            className="rounded p-1.5 hover:bg-secondary"
+                            style={{ color: "var(--color-primary)" }}
+                          >
+                            <FileCode size={15} />
+                          </button>
+                          <button
+                            title={`Adjuntar PDF para ${r.concepto}`}
+                            onClick={() => onFile("PDF", r)}
+                            className="rounded p-1.5 text-muted-foreground hover:bg-secondary"
+                          >
+                            <FileText size={15} />
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="border-t bg-secondary font-semibold">
+                <td className="p-3">Totales</td>
+                <td className="p-3 text-right">{fmtMoney(totSol)}</td>
+                <td className="p-3 text-right">{fmtMoney(totComp)}</td>
+                <td className="p-3 text-right">{fmtMoney(totComp - totSol)}</td>
+                <td></td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-        {/* Adjuntar */}
-        <div className="ckl-card p-4">
-          <div className="text-sm font-semibold">Adjuntar comprobantes</div>
-          <div className="mt-3 rounded-lg border-2 border-dashed p-6 text-center transition-colors hover:border-[color:var(--color-primary)]">
-            <Upload size={28} className="mx-auto text-muted-foreground" />
-            <p className="mt-2 text-sm">Arrastra archivos o usa los botones.</p>
-            <div className="mt-3 flex justify-center gap-2">
-              <button onClick={() => onFile("XML")} className="ckl-btn-primary"><FileCode size={14} /> XML — CFDI 4.0</button>
-              <button onClick={() => onFile("PDF")} className="ckl-btn-outline"><FileText size={14} /> PDF — Impreso</button>
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="mb-1 text-xs font-semibold text-muted-foreground">Log de validación</div>
-            <div className="max-h-[120px] overflow-auto rounded-md border bg-secondary p-2 font-mono text-[11px]">
-              {log.length === 0 ? <span className="text-muted-foreground">Sin actividad…</span> : log.map((l, i) => <div key={i}>{l}</div>)}
-            </div>
+      {/* Validación */}
+      <div className="ckl-card p-4">
+        <div className="text-sm font-semibold">Validación de comprobantes</div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Usa los íconos <FileCode size={11} className="inline" /> XML /{" "}
+          <FileText size={11} className="inline" /> PDF junto a cada concepto en la tabla de arriba
+          — así queda claro a qué renglón corresponde cada comprobante.
+        </p>
+        <div className="mt-3">
+          <div className="mb-1 text-xs font-semibold text-muted-foreground">Log de validación</div>
+          <div className="max-h-[120px] overflow-auto rounded-md border bg-secondary p-2 font-mono text-[11px]">
+            {log.length === 0 ? (
+              <span className="text-muted-foreground">Sin actividad…</span>
+            ) : (
+              log.map((l, i) => <div key={i}>{l}</div>)
+            )}
           </div>
         </div>
       </div>
@@ -218,24 +351,78 @@ function Comprobacion() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-secondary text-left text-xs text-muted-foreground">
-              <tr><th className="p-3">Tipo</th><th className="p-3">Fecha</th><th className="p-3">UUID</th><th className="p-3">Archivo</th><th className="p-3 text-right">Total</th><th className="p-3">Estatus</th><th className="p-3"></th></tr>
+              <tr>
+                <th className="p-3">Tipo</th>
+                <th className="p-3">Concepto</th>
+                <th className="p-3">Fecha</th>
+                <th className="p-3">UUID</th>
+                <th className="p-3">Archivo</th>
+                <th className="p-3 text-right">Total</th>
+                <th className="p-3">Estatus</th>
+                <th className="p-3"></th>
+              </tr>
             </thead>
             <tbody>
-              {fs.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-xs text-muted-foreground">Sin facturas</td></tr>}
-              {fs.map((f) => (
-                <tr key={f.id} className="border-t">
-                  <td className="p-3"><span className="ckl-badge" style={{ background: "#F1F3F5", color: "#333" }}>{f.tipo}</span></td>
-                  <td className="p-3 text-xs">{f.fecha}</td>
-                  <td className="p-3 font-mono text-[11px]">{f.uuid}</td>
-                  <td className="p-3 text-xs">{f.archivo}</td>
-                  <td className="p-3 text-right font-semibold">{fmtMoney(f.total)}</td>
-                  <td className="p-3"><span className="ckl-badge" style={{ background: f.status === "Verificado" ? "#D8F3DC" : "#FEE9EA", color: f.status === "Verificado" ? "#2D6A4F" : "#E30613" }}>{f.status}</span></td>
-                  <td className="p-3">
-                    <button className="rounded p-1 hover:bg-secondary" onClick={() => toast.info("Modo demo: edición no disponible.")}><Edit2 size={14} /></button>
-                    <button className="rounded p-1 hover:bg-secondary" onClick={() => removeFactura(f.id)}><Trash2 size={14} /></button>
+              {fs.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="p-6 text-center text-xs text-muted-foreground">
+                    Sin facturas
                   </td>
                 </tr>
-              ))}
+              )}
+              {fs.map((f) => {
+                const concepto = comprobantes.find((c) => c.id === f.concepto_id)?.concepto ?? "—";
+                return (
+                  <tr key={f.id} className="border-t">
+                    <td className="p-3">
+                      <span className="ckl-badge" style={{ background: "#F1F3F5", color: "#333" }}>
+                        {f.tipo}
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs">{concepto}</td>
+                    <td className="p-3 text-xs">{f.fecha}</td>
+                    <td className="p-3 font-mono text-[11px]">{f.uuid}</td>
+                    <td className="p-3 text-xs">{f.archivo}</td>
+                    <td className="p-3 text-right font-semibold">{fmtMoney(f.total)}</td>
+                    <td className="p-3">
+                      <span
+                        className="ckl-badge"
+                        style={{
+                          background: f.status === "Verificado" ? "#D8F3DC" : "#FEE9EA",
+                          color: f.status === "Verificado" ? "#2D6A4F" : "#E30613",
+                        }}
+                      >
+                        {f.status}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      <div className="flex gap-1">
+                        <button
+                          title="Ver"
+                          className="rounded p-1 hover:bg-secondary"
+                          onClick={() => verFactura(f)}
+                        >
+                          <Eye size={14} />
+                        </button>
+                        <button
+                          title="Descargar"
+                          className="rounded p-1 hover:bg-secondary"
+                          onClick={() => descargarFactura(f)}
+                        >
+                          <Download size={14} />
+                        </button>
+                        <button
+                          title="Eliminar"
+                          className="rounded p-1 hover:bg-secondary"
+                          onClick={() => removeFactura(f.id)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -249,16 +436,26 @@ function Comprobacion() {
             <input className="ckl-input" placeholder="Establecimiento" />
             <input className="ckl-input" placeholder="Lugar" />
           </div>
-          <button className="ckl-btn-outline mt-3" onClick={() => toast.success("Foto adjunta.")}><Upload size={14} /> Adjuntar foto</button>
+          <button className="ckl-btn-outline mt-3" onClick={() => toast.success("Foto adjunta.")}>
+            <Upload size={14} /> Adjuntar foto
+          </button>
         </div>
         <div className="ckl-card p-4" style={{ borderLeft: "4px solid var(--color-primary)" }}>
           <div className="text-sm font-semibold">Depósito sobrante</div>
-          <div className="mt-2 rounded-md p-2 text-xs" style={{ background: "#FEF3C7", color: "#D97706" }}>
+          <div
+            className="mt-2 rounded-md p-2 text-xs"
+            style={{ background: "#FEF3C7", color: "#D97706" }}
+          >
             Es obligatorio reintegrar el sobrante con comprobante bancario.
           </div>
           <div className="mt-3 flex gap-2">
             <input className="ckl-input" placeholder="Monto a reintegrar" />
-            <button className="ckl-btn-primary" onClick={() => toast.success("Comprobante bancario cargado.")}><Upload size={14} /> Cargar</button>
+            <button
+              className="ckl-btn-primary"
+              onClick={() => toast.success("Comprobante bancario cargado.")}
+            >
+              <Upload size={14} /> Cargar
+            </button>
           </div>
         </div>
       </div>
