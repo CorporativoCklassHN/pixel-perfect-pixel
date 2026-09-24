@@ -10,6 +10,7 @@ import {
   fmtMoney,
   uid,
   filterSolicitudesByDateCutoff,
+  filterSolicitudesByOwnership,
   type Solicitud,
   type User,
   type Autorizacion,
@@ -20,6 +21,8 @@ import { StatusBadge } from "./_portal.dashboard";
 import { Modal } from "./_portal.solicitar";
 
 export const Route = createFileRoute("/_portal/estatus")({
+  validateSearch: (search: Record<string, unknown>): { atrasados?: boolean } =>
+    search.atrasados ? { atrasados: true } : {},
   head: () => ({ meta: [{ title: "Estatus de viáticos — CKL" }] }),
   component: Estatus,
 });
@@ -77,6 +80,7 @@ function resolveHotelName(h: HotelStayStored, estado: string, catalogo: Hotel[])
 function Estatus() {
   const { user, role, hasPerm } = useAuth();
   const nav = useNavigate();
+  const { atrasados: soloAtrasados } = Route.useSearch();
   const [solicitudes, setSolicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
   const [autorizaciones, setAutorizaciones] = useLocalStorage<Autorizacion[]>(KEYS.autorizaciones, []);
   const [users] = useLocalStorage<User[]>(KEYS.users, []);
@@ -85,6 +89,7 @@ function Estatus() {
   const [hotelesCatalogo] = useLocalStorage<Hotel[]>(KEYS.hoteles, []);
   const config = JSON.parse(typeof window !== "undefined" ? localStorage.getItem(KEYS.config) ?? "{}" : "{}");
   const umbral = config.umbral_finanzas ?? 5000;
+  const diasComprobacionAtrasada = config.dias_comprobacion_atrasada ?? 7;
 
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("Todos");
@@ -93,14 +98,46 @@ function Estatus() {
   const [rejectNote, setRejectNote] = useState("");
 
   const filtered = useMemo(() => {
+    // Mismo criterio que usa "Comprobación": comprobado solo cuando el total
+    // comprobado iguala al total solicitado en todos sus renglones.
+    const estaComprobado = (solicitudId: string) => {
+      const filas = comprobantesGasto.filter((c) => c.solicitud_id === solicitudId);
+      const tot = filas.reduce((a, r) => a + r.monto_solicitado, 0);
+      const comp = filas.reduce((a, r) => a + r.monto_comprobado, 0);
+      return tot > 0 && comp === tot;
+    };
     const dentroDeRango = filterSolicitudesByDateCutoff(solicitudes, role?.nombre);
+    // El atajo "Ver comprobaciones atrasadas" del Dashboard cuenta solo lo que
+    // ese usuario puede ver ahí (propias/equipo/todas, según su rol) — aquí se
+    // aplica el mismo alcance para que la lista coincida con ese número,
+    // aunque Estatus normalmente no filtre por dueño.
+    const propiasIds = soloAtrasados
+      ? new Set(filterSolicitudesByOwnership(user, role, solicitudes, users).map((s) => s.id))
+      : null;
     return dentroDeRango.filter((s) => {
       const u = users.find((x) => x.id === s.user_id);
       const matchQ = !q || s.folio.toLowerCase().includes(q.toLowerCase()) || (u?.nombre.toLowerCase().includes(q.toLowerCase()) ?? false);
       const matchE = estado === "Todos" || s.estatus === estado;
-      return matchQ && matchE;
+      const diasTranscurridos = (Date.now() - new Date(s.created_at).getTime()) / 86400000;
+      const matchAtrasados =
+        !soloAtrasados ||
+        (propiasIds!.has(s.id) &&
+          s.estatus === "Cerrado" &&
+          !estaComprobado(s.id) &&
+          diasTranscurridos > diasComprobacionAtrasada);
+      return matchQ && matchE && matchAtrasados;
     });
-  }, [solicitudes, q, estado, users, role]);
+  }, [
+    solicitudes,
+    q,
+    estado,
+    users,
+    role,
+    user,
+    soloAtrasados,
+    comprobantesGasto,
+    diasComprobacionAtrasada,
+  ]);
 
   // Desglose detallado (hoteles, transportes, otros conceptos) del folio abierto
   // en el modal, para que quien autoriza vea qué compone el monto total.
@@ -203,6 +240,23 @@ function Estatus() {
 
   return (
     <div className="space-y-4">
+      {soloAtrasados && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-md p-3 text-sm"
+          style={{ background: "#FEE9EA", color: "#B5040F" }}
+        >
+          <span>
+            Mostrando solo folios cerrados con más de {diasComprobacionAtrasada} días sin comprobar
+            por completo.
+          </span>
+          <button
+            onClick={() => nav({ to: "/estatus" })}
+            className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold hover:bg-black/5"
+          >
+            Quitar filtro
+          </button>
+        </div>
+      )}
       <div className="ckl-card flex flex-wrap items-end gap-3 p-4">
         <div className="flex-1">
           <label className="ckl-label">Buscar</label>

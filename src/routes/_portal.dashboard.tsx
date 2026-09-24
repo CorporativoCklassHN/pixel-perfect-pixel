@@ -6,9 +6,11 @@ import {
   lsGet,
   fmtMoney,
   filterSolicitudesByOwnership,
+  filterSolicitudesByDateCutoff,
   type Solicitud,
   type Sociedad,
   type User,
+  type ComprobanteGasto,
 } from "@/lib/store";
 import { toast } from "sonner";
 
@@ -154,9 +156,20 @@ function Dashboard() {
   const allSolicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
   const sociedades = lsGet<Sociedad[]>(KEYS.sociedades, []);
   const users = lsGet<User[]>(KEYS.users, []);
+  const comprobantesGasto = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
   const mySoc = sociedades.find((s) => s.nombre === user?.empresa);
   const config = lsGet<{ dias_comprobacion_atrasada?: number }>(KEYS.config, {});
   const diasComprobacionAtrasada = config.dias_comprobacion_atrasada ?? 7;
+
+  // Mismo criterio que usan "Estatus" y "Comprobación": comprobado solo
+  // cuando el total comprobado iguala al total solicitado en todos sus
+  // renglones (no basta con que se haya subido el comprobante de viaje).
+  const estaComprobado = (solicitudId: string) => {
+    const filas = comprobantesGasto.filter((c) => c.solicitud_id === solicitudId);
+    const tot = filas.reduce((a, r) => a + r.monto_solicitado, 0);
+    const comp = filas.reduce((a, r) => a + r.monto_comprobado, 0);
+    return tot > 0 && comp === tot;
+  };
 
   // Usuario: solo sus propias solicitudes. Jefe inmediato: solo las de su equipo.
   // Administrador/Finanzas/Compras corporativas (y roles con "ver todo"): todas.
@@ -168,13 +181,19 @@ function Dashboard() {
     return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
   };
 
+  // "Ver comprobaciones atrasadas" lleva a Estatus, que solo muestra folios
+  // dentro de su ventana de fechas visible (2-4 meses según el rol) — se
+  // cuenta con ese mismo límite para que el número coincida con lo que esa
+  // pantalla realmente va a mostrar.
+  const solicitudesVisiblesEnEstatus = filterSolicitudesByDateCutoff(solicitudes, role?.nombre);
+
   const kpis = {
     pendientes: solicitudes.filter((s) => s.jefe_status === "Pendiente").length,
     autorizados: solicitudes.filter((s) => s.estatus === "Cerrado" && inMonth(s.created_at)).length,
-    atrasados: solicitudes.filter(
+    atrasados: solicitudesVisiblesEnEstatus.filter(
       (s) =>
         s.estatus === "Cerrado" &&
-        s.comprobante_viaje &&
+        !estaComprobado(s.id) &&
         (Date.now() - new Date(s.created_at).getTime()) / 86400000 > diasComprobacionAtrasada,
     ).length,
     enTiempo: solicitudes.filter((s) => s.estatus === "Cerrado" && s.comprobante_viaje).length,
@@ -216,7 +235,8 @@ function Dashboard() {
             <div>
               <div className="font-bold">
                 {kpis.atrasados} comprobaci{kpis.atrasados === 1 ? "ón" : "ones"} atrasada
-                {kpis.atrasados === 1 ? "" : "s"} más de 7 días
+                {kpis.atrasados === 1 ? "" : "s"}: más de {diasComprobacionAtrasada} días sin
+                comprobar
               </div>
               <div className="text-sm" style={{ color: "var(--color-primary-hover)" }}>
                 Requieren atención inmediata antes del cierre contable.
@@ -225,6 +245,7 @@ function Dashboard() {
           </div>
           <Link
             to="/estatus"
+            search={{ atrasados: true }}
             className="shrink-0 rounded-full px-5 py-2.5 text-center text-sm font-semibold text-white"
             style={{ background: "var(--color-primary)" }}
           >
