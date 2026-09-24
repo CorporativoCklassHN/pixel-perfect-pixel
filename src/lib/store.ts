@@ -633,10 +633,15 @@ function backfillGestorVuelosComprobar() {
 // Antes "Transporte foráneo"/"Transporte local" agrupaban TODOS sus medios
 // (Avión, Autobús, Uber, Taxi...) en un solo renglón de comprobación, lo que
 // no dejaba claro qué había que comprobar cuando había más de uno (p. ej.
-// Avión + Autobús en el mismo folio). Se reconstruyen como un renglón por
-// cada medio realmente usado, a partir del desglose real en KEYS.destinos —
-// funciona tanto para las solicitudes de ejemplo como para cualquier
-// solicitud real ya guardada con el esquema anterior.
+// Avión + Autobús en el mismo folio). Se reconstruye un renglón por cada
+// medio realmente usado, a partir del desglose real en KEYS.destinos.
+//
+// Se reconstruye el bloque de transporte COMPLETO de cada solicitud en cada
+// corrida (no solo la primera vez que se detecta el esquema viejo): así, sin
+// importar cuántas veces se ejecute este backfill, el resultado es siempre
+// exactamente un renglón por (solicitud, concepto) — nunca se acumulan
+// duplicados. El progreso de comprobación ya guardado se conserva emparejando
+// por nombre de concepto con lo que había antes de reconstruir.
 function backfillDesgloseTransportePorTipo() {
   const destinos = lsGet<
     {
@@ -664,35 +669,65 @@ function backfillDesgloseTransportePorTipo() {
   }
 
   const comprobantes = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
-  const NOMBRES_VIEJOS = new Set(["Transporte foráneo", "Transporte local"]);
-  // Solo se migran solicitudes de las que sí se tiene el desglose real — sin
-  // eso no hay con qué reconstruir, y es mejor dejar el renglón viejo intacto
-  // que perder el dato.
-  const aMigrar = new Set(
-    comprobantes
-      .filter((c) => NOMBRES_VIEJOS.has(c.concepto) && porSolicitud.has(c.solicitud_id))
-      .map((c) => c.solicitud_id),
-  );
-  if (aMigrar.size === 0) return;
+  const NO_TRANSPORTE = new Set(["Hotel", "Comida", "Otros"]);
+  const reconstruidas = new Set<string>();
+  let changed = false;
+  const resultado: ComprobanteGasto[] = [];
 
-  const conservados = comprobantes.filter(
-    (c) => !(aMigrar.has(c.solicitud_id) && (NOMBRES_VIEJOS.has(c.concepto) || c.concepto === "Avión")),
-  );
-  const nuevos: ComprobanteGasto[] = [];
-  for (const solId of aMigrar) {
-    const totales = porSolicitud.get(solId)!;
+  for (const c of comprobantes) {
+    if (NO_TRANSPORTE.has(c.concepto)) {
+      resultado.push(c);
+      continue;
+    }
+    // Renglón de transporte (viejo esquema, o ya migrado en una corrida
+    // anterior). Su solicitud completa se reconstruye una sola vez por
+    // corrida; cualquier otro renglón de transporte de la misma solicitud
+    // que aparezca después se descarta aquí (ya quedó representado).
+    if (reconstruidas.has(c.solicitud_id)) {
+      changed = true;
+      continue;
+    }
+    const totales = porSolicitud.get(c.solicitud_id);
+    if (!totales) {
+      // Sin desglose real disponible: no hay con qué reconstruir, se deja tal cual.
+      resultado.push(c);
+      continue;
+    }
+    reconstruidas.add(c.solicitud_id);
+    const previos = comprobantes.filter(
+      (x) => x.solicitud_id === c.solicitud_id && !NO_TRANSPORTE.has(x.concepto),
+    );
     for (const [concepto, monto] of [...totales.foraneo, ...totales.local]) {
-      nuevos.push({
-        id: uid("cg_"),
-        solicitud_id: solId,
+      const prev = previos.find((p) => p.concepto === concepto);
+      const monto_comprobado = prev ? Math.min(prev.monto_comprobado, monto) : 0;
+      const status_renglon: ComprobanteGasto["status_renglon"] =
+        monto <= 0
+          ? "no_aplica"
+          : monto_comprobado >= monto
+            ? "comprobado"
+            : monto_comprobado > 0
+              ? "parcialmente_comprobado"
+              : "pendiente";
+      const nuevo: ComprobanteGasto = {
+        id: prev?.id ?? uid("cg_"),
+        solicitud_id: c.solicitud_id,
         concepto,
         monto_solicitado: monto,
-        monto_comprobado: 0,
-        status_renglon: "pendiente",
-      });
+        monto_comprobado,
+        status_renglon,
+      };
+      if (
+        !prev ||
+        prev.monto_solicitado !== nuevo.monto_solicitado ||
+        prev.monto_comprobado !== nuevo.monto_comprobado ||
+        prev.status_renglon !== nuevo.status_renglon
+      ) {
+        changed = true;
+      }
+      resultado.push(nuevo);
     }
   }
-  lsSet(KEYS.comprobantesGasto, [...conservados, ...nuevos]);
+  if (changed) lsSet(KEYS.comprobantesGasto, resultado);
 }
 
 // Los folios de ejemplo (SEED_SOLICITUDES) usan números fijos elegidos al
