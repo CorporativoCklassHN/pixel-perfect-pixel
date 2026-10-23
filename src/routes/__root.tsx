@@ -79,6 +79,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: "https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap",
       },
       { rel: "stylesheet", href: appCss },
+      // Favicon vacío: evita el 404 del navegador buscando /favicon.ico.
+      { rel: "icon", href: "data:;base64,iVBORw0KGgo=" },
     ],
   }),
   shellComponent: RootShell,

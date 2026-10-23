@@ -1025,3 +1025,42 @@ export function filterSolicitudesByOwnership(
   }
   return solicitudes.filter((s) => s.user_id === user.id);
 }
+
+// ───────── Estatus visible ─────────
+// El valor guardado en Solicitud.estatus sigue siendo Abierto/Cerrado/Rechazado
+// (retrocompatibilidad con datos sembrados y persistidos). Lo que ve el usuario
+// se deriva de ese valor + el avance de comprobación:
+//   Abierto → "Pendiente" · Rechazado → "Rechazado"
+//   Cerrado sin comprobar por completo → "Autorizado" · Cerrado y comprobado → "Comprobado"
+export type EstatusVisible = "Pendiente" | "Autorizado" | "Comprobado" | "Rechazado";
+
+export const ESTATUS_VISIBLES: EstatusVisible[] = [
+  "Pendiente",
+  "Autorizado",
+  "Comprobado",
+  "Rechazado",
+];
+
+// Avance de comprobación de un folio: comprobado solo cuando el total
+// comprobado iguala al total solicitado (>0) sumando todos sus renglones.
+// `soloAvion` limita el cálculo al concepto "Avión" (vista del gestor de vuelos).
+export function avanceComprobacion(
+  comprobantes: ComprobanteGasto[],
+  solicitudId: string,
+  soloAvion = false,
+) {
+  const filas = comprobantes
+    .filter((c) => c.solicitud_id === solicitudId)
+    .filter((c) => !soloAvion || c.concepto === "Avión");
+  const solicitado = filas.reduce((a, r) => a + r.monto_solicitado, 0);
+  const comprobado = filas.reduce((a, r) => a + r.monto_comprobado, 0);
+  const completo = solicitado > 0 && comprobado === solicitado;
+  const pct = solicitado > 0 ? Math.min(100, Math.round((comprobado / solicitado) * 100)) : 0;
+  return { solicitado, comprobado, completo, pct };
+}
+
+export function estatusVisible(estatus: string, comprobado: boolean): EstatusVisible {
+  if (estatus === "Cerrado") return comprobado ? "Comprobado" : "Autorizado";
+  if (estatus === "Rechazado") return "Rechazado";
+  return "Pendiente";
+}

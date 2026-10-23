@@ -5,6 +5,8 @@ import { showErrorDialog } from "@/components/ErrorDialog";
 type AuthCtx = {
   user: User | null;
   role: Role | null;
+  // true hasta que se leyó la sesión guardada (primer render en el cliente).
+  cargando: boolean;
   login: (identifier: string, password: string) => boolean;
   logout: () => void;
   refresh: () => void;
@@ -14,8 +16,13 @@ type AuthCtx = {
 const Ctx = createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // La sesión se lee de localStorage en un efecto (no en el inicializador de useState):
+  // el servidor renderiza sin sesión y leerla síncronamente en el cliente rompería la
+  // hidratación. `cargando` evita que el layout redirija a /login en ese primer render
+  // (antes un F5 o una URL directa siempre terminaban en el Dashboard).
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<Role | null>(null);
+  const [cargando, setCargando] = useState(true);
   // La sesión (token) que esta pestaña considera "propia". Si en localStorage
   // aparece un token distinto para el mismo usuario, significa que se inició
   // sesión en otro lugar con esa misma cuenta y esta pestaña debe cerrarse.
@@ -35,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     initSeed();
     refresh();
+    setCargando(false);
     // Al montar (recarga de página), adopta la sesión ya guardada como propia.
     const u = lsGet<User | null>(KEYS.user, null);
     const sess = lsGet<SessionInfo | null>(KEYS.session, null);
@@ -90,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const hasPerm = (perm: string) => !!role?.permisos[perm];
 
-  return <Ctx.Provider value={{ user, role, login, logout, refresh, hasPerm }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, role, cargando, login, logout, refresh, hasPerm }}>{children}</Ctx.Provider>;
 }
 
 export function useAuth() {

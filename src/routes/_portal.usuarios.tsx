@@ -75,7 +75,47 @@ function Usuarios() {
       </div>
 
       <div className="ckl-card overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Móvil (< 768 px): tarjetas apiladas en lugar de tabla de 7 columnas. */}
+        <ul className="divide-y md:hidden">
+          {users.map((u) => {
+            const rc = ROLE_COLORS[roleName(u.rol_id)] ?? ROLE_COLORS.usuario;
+            const locked = !canModify(u);
+            return (
+              <li key={u.id} className="flex items-start gap-3 p-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white" style={{ background: "var(--color-primary)" }}>{u.initials}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium">{u.nombre}</span>
+                    <span className="ckl-badge" style={{ background: rc.bg, color: rc.fg }}>{roleName(u.rol_id)}</span>
+                  </div>
+                  <div className="mt-0.5 break-all text-xs text-muted-foreground">{u.correo}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{u.empresa}</div>
+                  <div className="text-xs text-muted-foreground">Jefe: {jefe(u.jefe_id)}</div>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <button
+                    onClick={() => toggleActive(u)}
+                    disabled={locked}
+                    aria-label={u.activo ? "Desactivar usuario" : "Activar usuario"}
+                    className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                    style={{ background: u.activo ? "var(--color-primary)" : "#ccc" }}
+                  >
+                    <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform" style={{ transform: u.activo ? "translateX(18px)" : "translateX(2px)" }} />
+                  </button>
+                  <button
+                    onClick={() => openEdit(u)}
+                    disabled={locked}
+                    aria-label="Editar usuario"
+                    className="rounded p-1.5 hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                  >
+                    <Edit2 size={14} />
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="bg-secondary text-left text-xs text-muted-foreground">
               <tr><th className="p-3">Nombre</th><th className="p-3">Correo</th><th className="p-3">Rol</th><th className="p-3">Empresa</th><th className="p-3">Jefe</th><th className="p-3">Activo</th><th className="p-3"></th></tr>

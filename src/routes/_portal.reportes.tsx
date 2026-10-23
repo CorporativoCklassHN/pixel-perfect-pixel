@@ -9,6 +9,9 @@ import {
   fmtMoney,
   filterSolicitudesByDateCutoff,
   filterSolicitudesByOwnership,
+  avanceComprobacion,
+  estatusVisible,
+  type ComprobanteGasto,
   type Solicitud,
   type Sociedad,
   type User,
@@ -25,6 +28,7 @@ function Reportes() {
   const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
   const [users] = useLocalStorage<User[]>(KEYS.users, []);
   const [sociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
+  const [comprobantes] = useLocalStorage<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
   const [fi, setFi] = useState("");
   const [ff, setFf] = useState("");
   const [soc, setSoc] = useState("Todas");
@@ -42,6 +46,9 @@ function Reportes() {
   const results = searched ?? visibleSolicitudes;
 
   const userName = (id: string) => users.find((u) => u.id === id)?.nombre ?? "—";
+  // Etiqueta visible (Pendiente/Autorizado/Comprobado/Rechazado); s.estatus guardado no cambia.
+  const etiqueta = (s: Solicitud) =>
+    estatusVisible(s.estatus, avanceComprobacion(comprobantes, s.id).completo);
 
   const search = () => {
     const r = visibleSolicitudes.filter((s) => {
@@ -66,7 +73,7 @@ function Reportes() {
     const data = results.map((s) => ({
       Folio: s.folio, Fecha: s.fecha, Usuario: userName(s.user_id),
       Sociedad: s.empresa, Destino: s.destino_resumen,
-      Monto: s.monto_total, Estatus: s.estatus,
+      Monto: s.monto_total, Estatus: etiqueta(s),
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), "Reporte");
@@ -104,7 +111,7 @@ function Reportes() {
             </select>
           </div>
         </div>
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           <button onClick={search} className="ckl-btn-primary"><Search size={14} /> Buscar</button>
           <button onClick={exportar} className="ckl-btn-outline"><FileSpreadsheet size={14} /> Exportar Excel</button>
           <button onClick={() => toast.success("Reporte enviado al correo registrado.")} className="ckl-btn-outline"><Mail size={14} /> Correo</button>
@@ -112,7 +119,28 @@ function Reportes() {
       </div>
 
       <div className="ckl-card overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Móvil (< 768 px): tarjetas apiladas en lugar de tabla de 8 columnas. */}
+        <ul className="divide-y md:hidden">
+          {enriched.map((s) => (
+            <li key={s.id} className="p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-xs font-semibold">{s.folio}</span>
+                <StatusBadge estatus={s.estatus} comprobado={avanceComprobacion(comprobantes, s.id).completo} />
+              </div>
+              <div className="mt-1 flex items-baseline justify-between gap-2">
+                <span className="truncate text-sm font-medium">{userName(s.user_id)}</span>
+                <span className="shrink-0 text-sm font-semibold">{fmtMoney(s.monto_total)}</span>
+              </div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{s.destino_resumen} · {s.fecha}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{s.empresa}</div>
+              <div className="mt-2">
+                <span className="ckl-badge" style={{ background: s.vencimiento === "Vencido" ? "#FEE9EA" : "#D8F3DC", color: s.vencimiento === "Vencido" ? "#E30613" : "#2D6A4F" }}>{s.vencimiento}</span>
+              </div>
+            </li>
+          ))}
+          {enriched.length === 0 && <li className="p-8 text-center text-xs text-muted-foreground">Sin resultados</li>}
+        </ul>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="bg-secondary text-left text-xs text-muted-foreground">
               <tr><th className="p-3">Folio</th><th className="p-3">Fecha</th><th className="p-3">Usuario</th><th className="p-3">Sociedad</th><th className="p-3">Destino</th><th className="p-3 text-right">Monto</th><th className="p-3">Vencimiento</th><th className="p-3">Estatus</th></tr>
@@ -127,7 +155,7 @@ function Reportes() {
                   <td className="p-3 text-xs">{s.destino_resumen}</td>
                   <td className="p-3 text-right font-semibold">{fmtMoney(s.monto_total)}</td>
                   <td className="p-3"><span className="ckl-badge" style={{ background: s.vencimiento === "Vencido" ? "#FEE9EA" : "#D8F3DC", color: s.vencimiento === "Vencido" ? "#E30613" : "#2D6A4F" }}>{s.vencimiento}</span></td>
-                  <td className="p-3"><StatusBadge estatus={s.estatus} /></td>
+                  <td className="p-3"><StatusBadge estatus={s.estatus} comprobado={avanceComprobacion(comprobantes, s.id).completo} /></td>
                 </tr>
               ))}
               {enriched.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-xs text-muted-foreground">Sin resultados</td></tr>}

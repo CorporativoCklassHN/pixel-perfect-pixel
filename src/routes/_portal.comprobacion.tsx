@@ -1,19 +1,37 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { Upload, FileText, FileCode, Trash2, Eye, Download } from "lucide-react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Upload,
+  FileText,
+  FileCode,
+  Trash2,
+  Eye,
+  Download,
+  Search,
+  ChevronDown,
+  CheckCircle2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useLocalStorage } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
 import {
   KEYS,
   fmtMoney,
+  filterSolicitudesByOwnership,
   uid,
+  avanceComprobacion,
   type Solicitud,
   type ComprobanteGasto,
   type Sociedad,
+  type User,
 } from "@/lib/store";
 
 export const Route = createFileRoute("/_portal/comprobacion")({
+  // solicitudId: folio a dejar seleccionado al llegar (p. ej. desde "Comprobar gastos" en Estatus).
+  validateSearch: (search: Record<string, unknown>): { solicitudId?: string } => {
+    const solicitudId = typeof search.solicitudId === "string" ? search.solicitudId : undefined;
+    return solicitudId ? { solicitudId } : {};
+  },
   head: () => ({ meta: [{ title: "Comprobación — CKL" }] }),
   component: Comprobacion,
 });
@@ -72,22 +90,44 @@ function descargarFactura(f: Factura) {
 }
 
 function Comprobacion() {
-  const { role } = useAuth();
+  const { user, role } = useAuth();
   // Gestor de vuelos solo debe ver/comprobar el concepto "Avión" de cada
   // folio — el resto (Hotel, Transporte foráneo terrestre, Transporte local,
   // Comida, Otros) y las secciones de No deducibles/Depósito sobrante no le
   // corresponden.
   const soloAvion = role?.nombre === "gestor_vuelos";
   const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
+  const [users] = useLocalStorage<User[]>(KEYS.users, []);
   const [sociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
   const [comprobantes, setComprobantes] = useLocalStorage<ComprobanteGasto[]>(
     KEYS.comprobantesGasto,
     [],
   );
   const [facturas, setFacturas] = useLocalStorage<Factura[]>(KEYS.facturasXml, []);
-  const cerradas = solicitudes.filter((s) => s.estatus === "Cerrado");
-  const [sid, setSid] = useState<string>(cerradas[0]?.id ?? "");
-  const sel = solicitudes.find((s) => s.id === sid);
+  // Alcance por rol: el usuario solo ve sus folios; ver_equipo/ver_todo amplían.
+  const cerradas = filterSolicitudesByOwnership(user, role, solicitudes, users).filter(
+    (s) => s.estatus === "Cerrado",
+  );
+  const nav = useNavigate();
+  const { solicitudId } = Route.useSearch();
+  const [sidState, setSid] = useState<string>(() =>
+    cerradas.some((c) => c.id === solicitudId) ? solicitudId! : (cerradas[0]?.id ?? ""),
+  );
+  // Si el folio guardado ya no está en el alcance del usuario, cae al primero disponible.
+  const sid = cerradas.some((c) => c.id === sidState) ? sidState : (cerradas[0]?.id ?? "");
+  // Si la URL trae (o cambia a) un solicitudId válido, ese folio queda seleccionado.
+  useEffect(() => {
+    if (solicitudId && cerradas.some((c) => c.id === solicitudId)) {
+      setSid(solicitudId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solicitudId, solicitudes, users, user, role]);
+  // Selección manual: actualiza el estado y refleja el folio en la URL (sin apilar historial).
+  const selectFolio = (id: string) => {
+    setSid(id);
+    nav({ to: "/comprobacion", search: { solicitudId: id }, replace: true });
+  };
+  const sel = cerradas.find((s) => s.id === sid);
   // Cada usuario factura a la Sociedad (razón social) con la que solicitó el
   // viático, no a su propio RFC personal — el Receptor del CFDI debe ser esa
   // sociedad.
@@ -221,34 +261,21 @@ function Comprobacion() {
   // Mismo criterio que "comprobado" arriba, pero para cualquier folio del
   // listado (no solo el seleccionado) — así el selector puede pintar en
   // verde los que ya están completos.
-  const estaComprobado = (solicitudId: string) => {
-    const filas = comprobantes
-      .filter((c) => c.solicitud_id === solicitudId)
-      .filter((c) => !soloAvion || c.concepto === "Avión");
-    const tot = filas.reduce((a, r) => a + r.monto_solicitado, 0);
-    const comp = filas.reduce((a, r) => a + r.monto_comprobado, 0);
-    return tot > 0 && comp === tot;
-  };
+  const avanceDe = (solicitudId: string) =>
+    avanceComprobacion(comprobantes, solicitudId, soloAvion);
 
   return (
-    <div className="space-y-5">
-      <div className="ckl-card p-4">
-        <label className="ckl-label">Folio</label>
-        <select className="ckl-input max-w-md" value={sid} onChange={(e) => setSid(e.target.value)}>
-          {cerradas.map((s) => (
-            <option
-              key={s.id}
-              value={s.id}
-              style={estaComprobado(s.id) ? { color: "#16A34A" } : undefined}
-            >
-              {s.folio} — {s.destino_resumen} ({fmtMoney(s.monto_total)})
-              {estaComprobado(s.id) ? " ✓" : ""}
-            </option>
-          ))}
-        </select>
-        <div className="mt-2 text-xs text-muted-foreground">
-          {sel.empresa} · {sel.tipo_viaje} · {sel.fecha}
-        </div>
+    <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-start">
+      <FolioPicker
+        solicitudes={cerradas}
+        selectedId={sid}
+        avanceDe={avanceDe}
+        onSelect={selectFolio}
+      />
+      <div className="min-w-0 space-y-5">
+      <div className="ckl-card p-4 text-xs text-muted-foreground">
+        <span className="text-sm font-semibold text-foreground">{sel.folio}</span> · {sel.empresa} ·{" "}
+        {sel.tipo_viaje} · {sel.fecha}
       </div>
 
       {/* Tabla */}
@@ -374,7 +401,57 @@ function Comprobacion() {
 
       <div className="ckl-card overflow-hidden">
         <div className="border-b p-4 text-sm font-semibold">Facturas cargadas</div>
-        <div className="overflow-x-auto">
+        {/* Móvil (< 768 px): tarjetas apiladas en lugar de tabla de 8 columnas. */}
+        <ul className="divide-y md:hidden">
+          {fs.length === 0 && (
+            <li className="p-6 text-center text-xs text-muted-foreground">Sin facturas</li>
+          )}
+          {fs.map((f) => {
+            const concepto = comprobantes.find((c) => c.id === f.concepto_id)?.concepto ?? "—";
+            return (
+              <li key={f.id} className="p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="ckl-badge" style={{ background: "#F1F3F5", color: "#333" }}>
+                      {f.tipo}
+                    </span>
+                    <span className="text-sm font-medium">{concepto}</span>
+                  </div>
+                  <span
+                    className="ckl-badge"
+                    style={{
+                      background: f.status === "Verificado" ? "#D8F3DC" : "#FEE9EA",
+                      color: f.status === "Verificado" ? "#2D6A4F" : "#E30613",
+                    }}
+                  >
+                    {f.status}
+                  </span>
+                </div>
+                <div className="mt-1 break-all text-xs">{f.archivo}</div>
+                <div className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">
+                  {f.uuid}
+                </div>
+                <div className="mt-1 flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    {f.fecha} · <b className="text-foreground">{fmtMoney(f.total)}</b>
+                  </span>
+                  <div className="flex gap-1">
+                    <button title="Ver" aria-label="Ver" className="rounded p-2 hover:bg-secondary" onClick={() => verFactura(f)}>
+                      <Eye size={16} />
+                    </button>
+                    <button title="Descargar" aria-label="Descargar" className="rounded p-2 hover:bg-secondary" onClick={() => descargarFactura(f)}>
+                      <Download size={16} />
+                    </button>
+                    <button title="Eliminar" aria-label="Eliminar" className="rounded p-2 hover:bg-secondary" onClick={() => removeFactura(f.id)}>
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="bg-secondary text-left text-xs text-muted-foreground">
               <tr>
@@ -487,6 +564,141 @@ function Comprobacion() {
           </div>
         </div>
       )}
+      </div>
     </div>
+  );
+}
+
+// Panel maestro: tarjetas de folios con buscador y barra de avance de comprobación.
+// En móvil (< 1024 px) se colapsa al folio elegido y se despliega con "Cambiar folio".
+function FolioPicker({
+  solicitudes,
+  selectedId,
+  avanceDe,
+  onSelect,
+}: {
+  solicitudes: Solicitud[];
+  selectedId: string;
+  avanceDe: (solicitudId: string) => ReturnType<typeof avanceComprobacion>;
+  onSelect: (id: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = solicitudes.find((s) => s.id === selectedId);
+
+  const visibles = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return solicitudes;
+    return solicitudes.filter((s) =>
+      [s.folio, s.destino_resumen, s.fecha, s.empresa].some((v) => v.toLowerCase().includes(t)),
+    );
+  }, [solicitudes, q]);
+
+  const renderCard = (s: Solicitud) => {
+    const a = avanceDe(s.id);
+    const activo = s.id === selectedId;
+    return (
+      <div
+        className="w-full rounded-lg border p-3 text-left"
+        style={{
+          borderColor: activo ? "var(--color-primary)" : "var(--color-border)",
+          background: activo ? "var(--color-primary-soft)" : "white",
+        }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-mono text-xs font-semibold">{s.folio}</span>
+          <span
+            className="ckl-badge"
+            style={{
+              background: a.completo ? "#D8F3DC" : "#FEF3C7",
+              color: a.completo ? "#2D6A4F" : "#B45309",
+            }}
+          >
+            {a.completo && <CheckCircle2 size={11} />}[{a.completo ? "Comprobado" : "Pendiente"}]
+          </span>
+        </div>
+        <div className="mt-1 truncate text-sm font-medium">{s.destino_resumen}</div>
+        <div className="mt-0.5 flex items-center justify-between text-xs text-muted-foreground">
+          <span>{s.fecha}</span>
+          <span className="font-semibold text-foreground">{fmtMoney(s.monto_total)}</span>
+        </div>
+        <div className="mt-2">
+          <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+            <span>
+              {fmtMoney(a.comprobado)} de {fmtMoney(a.solicitado)}
+            </span>
+            <span className="font-semibold">{a.pct}%</span>
+          </div>
+          <div
+            role="progressbar"
+            aria-valuenow={a.pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            className="h-1.5 overflow-hidden rounded-full bg-secondary"
+          >
+            <div
+              className="h-full rounded-full transition-all"
+              style={{ width: `${a.pct}%`, background: a.completo ? "#2D6A4F" : "#E30613" }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <aside className="ckl-picker ckl-card p-3 lg:sticky lg:top-4">
+      <label className="ckl-label">Folio</label>
+
+      {/* Móvil: folio seleccionado + botón para desplegar el listado */}
+      {selected && (
+        <div className="space-y-2 lg:hidden">
+          {renderCard(selected)}
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="ckl-btn-outline w-full justify-center"
+            aria-expanded={open}
+          >
+            {open ? "Ocultar folios" : "Cambiar folio"}
+            <ChevronDown size={14} className={open ? "rotate-180" : ""} />
+          </button>
+        </div>
+      )}
+
+      <div className={`${open ? "block" : "hidden"} mt-3 lg:mt-0 lg:block`}>
+        <div className="relative">
+          <Search
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+            size={15}
+          />
+          <input
+            className="ckl-input pl-8"
+            placeholder="Buscar folio, destino o fecha..."
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <ul className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-0.5 lg:max-h-[65vh]">
+          {visibles.map((s) => (
+            <li key={s.id}>
+              <button
+                type="button"
+                className="block w-full"
+                onClick={() => {
+                  onSelect(s.id);
+                  setOpen(false);
+                }}
+              >
+                {renderCard(s)}
+              </button>
+            </li>
+          ))}
+          {visibles.length === 0 && (
+            <li className="p-4 text-center text-xs text-muted-foreground">Sin resultados</li>
+          )}
+        </ul>
+      </div>
+    </aside>
   );
 }

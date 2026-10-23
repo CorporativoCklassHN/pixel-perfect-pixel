@@ -7,6 +7,8 @@ import {
   fmtMoney,
   filterSolicitudesByOwnership,
   filterSolicitudesByDateCutoff,
+  avanceComprobacion,
+  estatusVisible,
   type Solicitud,
   type Sociedad,
   type User,
@@ -164,12 +166,8 @@ function Dashboard() {
   // Mismo criterio que usan "Estatus" y "Comprobación": comprobado solo
   // cuando el total comprobado iguala al total solicitado en todos sus
   // renglones (no basta con que se haya subido el comprobante de viaje).
-  const estaComprobado = (solicitudId: string) => {
-    const filas = comprobantesGasto.filter((c) => c.solicitud_id === solicitudId);
-    const tot = filas.reduce((a, r) => a + r.monto_solicitado, 0);
-    const comp = filas.reduce((a, r) => a + r.monto_comprobado, 0);
-    return tot > 0 && comp === tot;
-  };
+  const estaComprobado = (solicitudId: string) =>
+    avanceComprobacion(comprobantesGasto, solicitudId).completo;
 
   // Usuario: solo sus propias solicitudes. Jefe inmediato: solo las de su equipo.
   // Administrador/Finanzas/Compras corporativas (y roles con "ver todo"): todas.
@@ -355,7 +353,7 @@ function Dashboard() {
                     <td className="p-3 text-xs">{s.destino_resumen}</td>
                     <td className="p-3 text-right font-semibold">{fmtMoney(s.monto_total)}</td>
                     <td className="p-3">
-                      <StatusBadge estatus={s.estatus} />
+                      <StatusBadge estatus={s.estatus} comprobado={estaComprobado(s.id)} />
                     </td>
                   </tr>
                 );
@@ -377,19 +375,34 @@ function Field({ k, v }: { k: string; v: string }) {
   );
 }
 
-export function StatusBadge({ estatus }: { estatus: string }) {
+// `estatus` acepta el valor interno de la solicitud (Abierto/Cerrado/Rechazado)
+// o un estado de paso (Pendiente/Autorizado/N/A de Jefe/Finanzas). El valor
+// interno se traduce a la etiqueta visible: Abierto → Pendiente, Rechazado →
+// Rechazado y Cerrado → Autorizado (azul) o Comprobado (verde) según `comprobado`.
+export function StatusBadge({
+  estatus,
+  comprobado = false,
+}: {
+  estatus: string;
+  comprobado?: boolean;
+}) {
+  const interno = estatus === "Abierto" || estatus === "Cerrado" || estatus === "Rechazado";
+  const label = interno ? estatusVisible(estatus, comprobado) : estatus;
   const m: Record<string, { bg: string; color: string }> = {
-    Cerrado: { bg: "#D8F3DC", color: "#2D6A4F" },
-    Abierto: { bg: "#FEF3C7", color: "#B45309" },
-    Rechazado: { bg: "#FEE9EA", color: "#E30613" },
+    Comprobado: { bg: "#D8F3DC", color: "#2D6A4F" },
+    // Autorizado a nivel solicitud (aún falta comprobar): azul suave, para no
+    // confundirlo con el "Autorizado" verde de los pasos Jefe/Finanzas.
+    AutorizadoSolicitud: { bg: "#DBEAFE", color: "#1D4ED8" },
     Pendiente: { bg: "#FEF3C7", color: "#B45309" },
+    Rechazado: { bg: "#FEE9EA", color: "#E30613" },
     Autorizado: { bg: "#D8F3DC", color: "#2D6A4F" },
     "N/A": { bg: "#F1F3F5", color: "#666" },
   };
-  const s = m[estatus] ?? m.Pendiente;
+  const key = interno && label === "Autorizado" ? "AutorizadoSolicitud" : label;
+  const s = m[key] ?? m.Pendiente;
   return (
     <span className="ckl-badge" style={{ background: s.bg, color: s.color }}>
-      {estatus}
+      {label}
     </span>
   );
 }

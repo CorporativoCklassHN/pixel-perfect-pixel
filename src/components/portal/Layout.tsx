@@ -11,16 +11,16 @@ import cklassLogo from "@/cklass-logo.png";
 type Item = { to: string; label: string; icon: React.ComponentType<{ size?: number }>; perm?: string; section: string; badge?: number };
 
 export function PortalLayout() {
-  const { user, role, logout } = useAuth();
+  const { user, role, cargando, logout } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!user) nav({ to: "/login" });
-  }, [user, nav]);
+    if (!cargando && !user) nav({ to: "/login" });
+  }, [cargando, user, nav]);
 
-  if (!user || !role) return null;
+  if (cargando || !user || !role) return null;
 
   const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
   const abiertos = solicitudes.filter((s) => s.estatus === "Abierto").length;

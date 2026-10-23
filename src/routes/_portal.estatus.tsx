@@ -1,6 +1,16 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Search, MessageSquareWarning, Upload, Check, X, Edit2, RotateCcw } from "lucide-react";
+import {
+  Search,
+  MessageSquareWarning,
+  Upload,
+  Check,
+  X,
+  Edit2,
+  RotateCcw,
+  Eye,
+  ReceiptText,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useLocalStorage } from "@/lib/auth";
@@ -11,6 +21,9 @@ import {
   uid,
   filterSolicitudesByDateCutoff,
   filterSolicitudesByOwnership,
+  avanceComprobacion,
+  estatusVisible,
+  ESTATUS_VISIBLES,
   type Solicitud,
   type User,
   type Autorizacion,
@@ -97,15 +110,16 @@ function Estatus() {
   const [rejecting, setRejecting] = useState<Solicitud | null>(null);
   const [rejectNote, setRejectNote] = useState("");
 
+  // Mismo criterio que usa "Comprobación": comprobado solo cuando el total
+  // comprobado iguala al total solicitado en todos sus renglones.
+  const estaComprobado = (solicitudId: string) =>
+    avanceComprobacion(comprobantesGasto, solicitudId).completo;
+  // Etiqueta que ve el usuario (Pendiente/Autorizado/Comprobado/Rechazado); el
+  // valor guardado en s.estatus sigue siendo Abierto/Cerrado/Rechazado.
+  const etiquetaEstatus = (s: Solicitud) => estatusVisible(s.estatus, estaComprobado(s.id));
+
   const filtered = useMemo(() => {
-    // Mismo criterio que usa "Comprobación": comprobado solo cuando el total
-    // comprobado iguala al total solicitado en todos sus renglones.
-    const estaComprobado = (solicitudId: string) => {
-      const filas = comprobantesGasto.filter((c) => c.solicitud_id === solicitudId);
-      const tot = filas.reduce((a, r) => a + r.monto_solicitado, 0);
-      const comp = filas.reduce((a, r) => a + r.monto_comprobado, 0);
-      return tot > 0 && comp === tot;
-    };
+    const comprobado = (id: string) => avanceComprobacion(comprobantesGasto, id).completo;
     const dentroDeRango = filterSolicitudesByDateCutoff(solicitudes, role?.nombre);
     // El atajo "Ver comprobaciones atrasadas" del Dashboard cuenta solo lo que
     // ese usuario puede ver ahí (propias/equipo/todas, según su rol) — aquí se
@@ -117,13 +131,14 @@ function Estatus() {
     return dentroDeRango.filter((s) => {
       const u = users.find((x) => x.id === s.user_id);
       const matchQ = !q || s.folio.toLowerCase().includes(q.toLowerCase()) || (u?.nombre.toLowerCase().includes(q.toLowerCase()) ?? false);
-      const matchE = estado === "Todos" || s.estatus === estado;
+      const matchE =
+        estado === "Todos" || estatusVisible(s.estatus, comprobado(s.id)) === estado;
       const diasTranscurridos = (Date.now() - new Date(s.created_at).getTime()) / 86400000;
       const matchAtrasados =
         !soloAtrasados ||
         (propiasIds!.has(s.id) &&
           s.estatus === "Cerrado" &&
-          !estaComprobado(s.id) &&
+          !comprobado(s.id) &&
           diasTranscurridos > diasComprobacionAtrasada);
       return matchQ && matchE && matchAtrasados;
     });
@@ -268,13 +283,75 @@ function Estatus() {
         <div>
           <label className="ckl-label">Estatus</label>
           <select className="ckl-input" value={estado} onChange={(e) => setEstado(e.target.value)}>
-            {["Todos", "Abierto", "Cerrado", "Rechazado"].map((s) => <option key={s}>{s}</option>)}
+            {["Todos", ...ESTATUS_VISIBLES].map((s) => <option key={s}>{s}</option>)}
           </select>
         </div>
       </div>
 
       <div className="ckl-card overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Móvil (< 768 px): tarjetas apiladas. Un toque (o el ojo) abre el detalle;
+            así no depende del doble toque, que en móvil dispara el zoom del navegador. */}
+        <ul className="divide-y md:hidden">
+          {filtered.map((s) => {
+            const ok = s.jefe_status === "Autorizado" && (s.finanzas_status === "Autorizado" || s.finanzas_status === "N/A");
+            const bad = s.estatus === "Rechazado";
+            const stripe = bad ? "#E30613" : ok ? "#2D6A4F" : "#CCC";
+            return (
+              <li key={s.id} style={{ borderLeft: `3px solid ${stripe}`, touchAction: "manipulation" }}>
+                <div className="flex items-stretch">
+                  <button
+                    type="button"
+                    onClick={() => setDetail(s)}
+                    className="min-w-0 flex-1 p-3 text-left active:bg-secondary/60"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs font-semibold">{s.folio}</span>
+                      <StatusBadge estatus={s.estatus} comprobado={estaComprobado(s.id)} />
+                    </div>
+                    <div className="mt-1 flex items-baseline justify-between gap-2">
+                      <span className="truncate text-sm font-medium">{userName(s.user_id)}</span>
+                      <span className="shrink-0 text-sm font-semibold">{fmtMoney(s.monto_total)}</span>
+                    </div>
+                    <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {s.destino_resumen} · {s.fecha}
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span className="text-muted-foreground">Jefe</span>
+                      <StatusBadge estatus={s.jefe_status} />
+                      <span className="ml-1 text-muted-foreground">Finanzas</span>
+                      <StatusBadge estatus={s.finanzas_status} />
+                      {s.nota_rechazo && (
+                        <MessageSquareWarning size={14} className="text-[color:var(--color-primary)]" />
+                      )}
+                    </div>
+                    <div className="mt-1.5">
+                      {s.comprobante_viaje ? (
+                        <span className="ckl-badge" style={{ background: "#DCFCE7", color: "#16A34A" }}>Comprobante cargado {s.comprobante_viaje}</span>
+                      ) : (
+                        <span className="ckl-badge" style={{ background: "#FEE2E2", color: "#DC2626" }}>Comprobante sin cargar</span>
+                      )}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDetail(s)}
+                    aria-label={`Ver detalle del folio ${s.folio}`}
+                    className="flex w-12 shrink-0 flex-col items-center justify-center gap-0.5 border-l text-[10px] font-semibold active:bg-secondary/60"
+                    style={{ color: "var(--color-primary)" }}
+                  >
+                    <Eye size={20} />
+                    Ver
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+          {filtered.length === 0 && (
+            <li className="p-8 text-center text-sm text-muted-foreground">Sin solicitudes</li>
+          )}
+        </ul>
+
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="bg-secondary text-left text-xs text-muted-foreground">
               <tr>
@@ -310,7 +387,7 @@ function Estatus() {
                         : <span className="ckl-badge" style={{ background: "#FEE2E2", color: "#DC2626" }}>Sin cargar</span>}
                     </td>
                     <td className="p-3">{s.nota_rechazo && <MessageSquareWarning size={16} className="text-[color:var(--color-primary)]" />}</td>
-                    <td className="p-3"><StatusBadge estatus={s.estatus} /></td>
+                    <td className="p-3"><StatusBadge estatus={s.estatus} comprobado={estaComprobado(s.id)} /></td>
                   </tr>
                 );
               })}
@@ -320,7 +397,10 @@ function Estatus() {
             </tbody>
           </table>
         </div>
-        <div className="border-t bg-secondary p-2 text-[11px] text-muted-foreground">Doble clic en una fila para ver detalle.</div>
+        <div className="border-t bg-secondary p-2 text-[11px] text-muted-foreground">
+          <span className="hidden md:inline">Doble clic en una fila para ver detalle.</span>
+          <span className="md:hidden">Toca un folio (o el ojo) para ver el detalle.</span>
+        </div>
       </div>
 
       {detail && (
@@ -337,7 +417,7 @@ function Estatus() {
               ["Empresa", detail.empresa], ["Origen", detail.origen],
               ["Destino", detail.destino_resumen], ["Tipo", detail.tipo_viaje],
               ["Personas", String(detail.personas_count)], ["Viajeros", detail.personas_nombres],
-              ["Monto total", fmtMoney(detail.monto_total)], ["Estatus", detail.estatus],
+              ["Monto total", fmtMoney(detail.monto_total)], ["Estatus", etiquetaEstatus(detail)],
             ].map(([k, v]) => (
               <div key={k}><div className="text-muted-foreground">{k}</div><div className="font-medium">{v}</div></div>
             ))}
@@ -450,6 +530,18 @@ function Estatus() {
                 </button>
                 <button onClick={() => eliminar(detail)} className="ckl-btn-outline">Eliminar</button>
               </>
+            )}
+            {detail.estatus === "Cerrado" && role?.permisos.comprobar && role.nombre !== "administrador" && (
+              <button
+                onClick={() => {
+                  const id = detail.id;
+                  setDetail(null);
+                  nav({ to: "/comprobacion", search: { solicitudId: id } });
+                }}
+                className="ckl-btn-outline"
+              >
+                <ReceiptText size={14} /> Comprobar gastos
+              </button>
             )}
             {role?.permisos.subir_comprobantes_viaje && !detail.comprobante_viaje && detail.estatus === "Cerrado" && (
               <button onClick={() => subirComprobante(detail)} className="ckl-btn-outline"><Upload size={14} /> Subir comprobantes</button>
