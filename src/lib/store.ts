@@ -1064,3 +1064,79 @@ export function estatusVisible(estatus: string, comprobado: boolean): EstatusVis
   if (estatus === "Rechazado") return "Rechazado";
   return "Pendiente";
 }
+
+// ───────── Nueva solicitud: folios sin comprobar ─────────
+// Un usuario con este número (o más) de folios autorizados (Cerrado) y sin
+// comprobar por completo no puede generar una nueva solicitud hasta concluir
+// la comprobación de alguno.
+export const MAX_FOLIOS_SIN_COMPROBAR = 2;
+
+export function foliosSinComprobar(
+  userId: string,
+  solicitudes: Solicitud[],
+  comprobantes: ComprobanteGasto[],
+): Solicitud[] {
+  return solicitudes.filter(
+    (s) =>
+      s.user_id === userId &&
+      s.estatus === "Cerrado" &&
+      !avanceComprobacion(comprobantes, s.id).completo,
+  );
+}
+
+// Devuelve el mensaje de bloqueo si el usuario no puede crear una solicitud nueva,
+// o null si puede. Lee localStorage al momento de llamarse (no depende de estado React).
+export function bloqueoNuevaSolicitud(userId: string): string | null {
+  const pendientes = foliosSinComprobar(
+    userId,
+    lsGet<Solicitud[]>(KEYS.solicitudes, []),
+    lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []),
+  );
+  if (pendientes.length < MAX_FOLIOS_SIN_COMPROBAR) return null;
+  return `Para generar una nueva solicitud necesitas concluir la comprobación de tus viáticos anteriores. Folios sin comprobar por completo: ${pendientes
+    .map((s) => s.folio)
+    .join(", ")}.`;
+}
+
+// ───────── Cambio de contraseña ─────────
+const CONTRASENAS_COMUNES = [
+  "password", "contrasena", "contraseña", "admin", "administrador", "qwerty",
+  "abcdef", "letmein", "welcome", "bienvenido", "cklass", "viaticos", "viáticos",
+  "123456", "12345678", "iloveyou", "monkey", "dragon", "football", "futbol",
+];
+
+export const PASSWORD_MIN_LENGTH = 12;
+
+export function evaluarContrasena(nueva: string, user: Pick<User, "correo" | "nombre">) {
+  const lower = nueva.toLowerCase();
+  const usuarioCorreo = user.correo.split("@")[0].toLowerCase();
+  const longitud = nueva.length >= PASSWORD_MIN_LENGTH;
+  const todoIgual = /^(.)\1+$/.test(nueva);
+  const secuencia = /(0123|1234|2345|3456|4567|5678|6789|abcd|qwer)/i.test(nueva);
+  const comun =
+    CONTRASENAS_COMUNES.some((c) => lower.includes(c)) ||
+    (usuarioCorreo.length >= 4 && lower.includes(usuarioCorreo)) ||
+    todoIgual ||
+    secuencia;
+  return { longitud, noComun: nueva.length > 0 && !comun };
+}
+
+// Cambia la contraseña del usuario en sesión. "actual_incorrecta" si no coincide.
+export function cambiarContrasena(
+  userId: string,
+  actual: string,
+  nueva: string,
+): "ok" | "actual_incorrecta" | "no_encontrado" {
+  const users = lsGet<User[]>(KEYS.users, []);
+  const idx = users.findIndex((u) => u.id === userId);
+  if (idx === -1) return "no_encontrado";
+  if (users[idx].password !== actual) return "actual_incorrecta";
+  const actualizado = { ...users[idx], password: nueva };
+  const copia = [...users];
+  copia[idx] = actualizado;
+  lsSet(KEYS.users, copia);
+  // El usuario en sesión (ckl_user) guarda una copia completa: se mantiene sincronizada.
+  const sesion = lsGet<User | null>(KEYS.user, null);
+  if (sesion && sesion.id === userId) lsSet(KEYS.user, actualizado);
+  return "ok";
+}

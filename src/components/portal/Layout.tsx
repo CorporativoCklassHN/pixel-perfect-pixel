@@ -2,16 +2,18 @@ import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, FilePlus2, ListChecks, ReceiptText, BarChart3,
-  Users, ShieldCheck, Settings, LogOut, Menu, Bell, Plus, X,
+  Users, ShieldCheck, Settings, Menu, Bell, Plus, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { KEYS, lsGet, type Solicitud } from "@/lib/store";
+import { KEYS, lsGet, bloqueoNuevaSolicitud, type Solicitud } from "@/lib/store";
+import { showErrorDialog } from "@/components/ErrorDialog";
+import { UserMenu } from "@/components/portal/UserMenu";
 import cklassLogo from "@/cklass-logo.png";
 
 type Item = { to: string; label: string; icon: React.ComponentType<{ size?: number }>; perm?: string; section: string; badge?: number };
 
 export function PortalLayout() {
-  const { user, role, cargando, logout } = useAuth();
+  const { user, role, cargando } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
   const [open, setOpen] = useState(false);
@@ -123,25 +125,28 @@ export function PortalLayout() {
             </div>
             <div className="truncate text-sm font-semibold">{current?.label ?? "Inicio"}</div>
           </div>
-          <button
-            onClick={() => {
-              logout();
-              nav({ to: "/login" });
-            }}
-            className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold hover:bg-secondary"
-            style={{ color: "var(--color-primary)" }}
-            title="Cerrar sesión"
-          >
-            <LogOut size={15} /> <span className="hidden sm:inline">Cerrar sesión</span>
-          </button>
+          {role.permisos.solicitar && role.nombre !== "administrador" && (
+            <button
+              type="button"
+              onClick={() => {
+                // Con 2 o más folios autorizados sin comprobar por completo no se
+                // puede generar una solicitud nueva.
+                const bloqueo = bloqueoNuevaSolicitud(user.id);
+                if (bloqueo) return showErrorDialog(bloqueo);
+                nav({ to: "/solicitar" });
+              }}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border bg-white px-3 py-2 text-sm font-semibold hover:bg-secondary"
+              style={{ color: "var(--color-primary)", borderColor: "var(--color-primary)" }}
+              title="Nueva solicitud"
+            >
+              <Plus size={15} /> <span className="hidden sm:inline">Nueva solicitud</span>
+            </button>
+          )}
           <button className="shrink-0 rounded-md p-2 hover:bg-secondary" title="Notificaciones">
             <Bell size={18} />
           </button>
-          {role.permisos.solicitar && role.nombre !== "administrador" && (
-            <Link to="/solicitar" className="ckl-btn-primary shrink-0" title="Nueva solicitud">
-              <Plus size={15} /> <span className="hidden sm:inline">Nueva solicitud</span>
-            </Link>
-          )}
+          <div className="mx-0.5 hidden h-8 w-px bg-border sm:block" />
+          <UserMenu />
         </header>
         <main className="flex-1 overflow-auto p-4 md:p-6">
           <Outlet />

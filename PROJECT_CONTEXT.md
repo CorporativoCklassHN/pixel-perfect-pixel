@@ -17,7 +17,8 @@ Portal web (en español de México) para que empleados de Grupo Cklass **solicit
 |---|---|
 | `src/lib/store.ts` | **Fuente de verdad**: tipos (`User`, `Role`, `Solicitud`, `Autorizacion`, `ComprobanteGasto`, `Sociedad`, `Hotel`…), `KEYS` de localStorage, datos semilla, `lsGet/lsSet`, `nextFolio`, `fmtMoney`, reset de contraseña, filtros de visibilidad por rol/fecha |
 | `src/lib/auth.tsx` | `AuthProvider`, `useAuth()` (`user`, `role`, `cargando`, `login`, `logout`, `hasPerm`), `useLocalStorage<T>` |
-| `src/components/portal/Layout.tsx` | Sidebar/topbar y filtrado del menú por permisos |
+| `src/components/portal/Layout.tsx` | Sidebar/topbar y filtrado del menú por permisos; botón “Nueva solicitud” (fondo blanco, borde/texto rojo) con la validación de folios pendientes |
+| `src/components/portal/UserMenu.tsx` | Menú de usuario del encabezado (nombre + rol → Cerrar sesión / Cambiar contraseña) y el diálogo “Configuración de seguridad” |
 | `src/components/ErrorDialog.tsx` | `showErrorDialog(msg)`: diálogo centrado bloqueante para **errores y validaciones** (se reemplazó el toast de error). Los éxitos siguen usando `toast.success` (sonner) |
 | `src/routes/login.tsx` | Login (por correo **o RFC**), Pre-Registro, recuperación de contraseña |
 | `src/routes/_portal.dashboard.tsx` | Dashboard (gráfica mensual, atajo a comprobaciones atrasadas) |
@@ -94,6 +95,8 @@ Sociedades: WATA GROUP, INTERMEDIARIA INTERMEX, TRANSPORTES DE PERSONAL Y MERCAN
   - Comida = `días totales × monto_comida_diario × personas` (config, default $450).
   - Hotel = tarifa por noche × noches de cada estancia. Noches = días del rango − 1. Tarifa viene del catálogo de hoteles o es **manual por noche**.
   - Foráneo: Avión, Autobús (antes “Camión”), Tren, Otro. Local: Uber, Taxi, Metro, Combi, Otro.
+- **Pago directo por la empresa**: Hotel y Avión se pagan con la tarjeta corporativa y **no se depositan** al viajero. La barra de totales muestra “Pago directo empresa” (Hotel + todos los renglones de transporte foráneo tipo Avión) en verde forest (`#228B22`) antes de “Total a depositar” = total − pago directo. **Solo es de presentación**: `Solicitud.monto_total`, el umbral de Finanzas y los renglones de comprobación siguen usando el total completo (Hotel y Avión se siguen comprobando).
+- **Bloqueo de solicitudes nuevas**: si el usuario tiene **2 o más** folios propios `Cerrado` (autorizados) sin comprobar por completo (`foliosSinComprobar` / `bloqueoNuevaSolicitud` en `store.ts`, tope `MAX_FOLIOS_SIN_COMPROBAR = 2`), “Nueva solicitud” muestra un diálogo con los folios pendientes y no navega. También se valida al entrar a `/solicitar` (menú lateral o URL; redirige a Comprobación) y al guardar. La edición de una solicitud existente (`editId`) está exenta. Al comprobar por completo uno de los folios (quedan <2) vuelve a permitirse. Los usuarios demo `usuario@` (#0040, #0045, #0060) quedan bloqueados de inicio.
 - Validaciones (todas con `showErrorDialog`): motivo obligatorio; fechas de cada destino obligatorias, no anteriores a hoy, fin ≥ inicio, sin empalme con el destino previo; si el destino tiene ≥1 noche **debe haber hotel** y las estancias deben cubrir **exactamente** el rango del destino sin huecos ni empalmes, cada fila con hotel seleccionado.
 - Edición: solo el dueño, solo si está `Abierto` y **sin autorizaciones/rechazos** registrados.
 - Al guardar se generan renglones de comprobación: `Hotel`, **uno por cada tipo de transporte realmente usado** (Avión, Autobús, Uber…; “Otro” se distingue como `Otro (foráneo)` / `Otro (transporte local)`), `Comida`, `Otros`. Los montos de transporte iguales se suman por tipo (evitar filas duplicadas).
@@ -121,6 +124,12 @@ Sociedades: WATA GROUP, INTERMEDIARIA INTERMEX, TRANSPORTES DE PERSONAL Y MERCAN
 ### Configuración (admin)
 `monto_comida_diario`, `umbral_finanzas`, `dia_deposito`, `email_compras`, `dias_comprobacion_atrasada` (7), `dias_autorizacion_pendiente` (3), `dias_recordatorio_viaje` (2), notificaciones por email/plataforma, SMTP (servidor/puerto/usuario/password/cifrado), revisión automática. CRUD de sociedades, hoteles, orígenes y roles (se pueden crear roles y borrar los que no se usan). **Las automatizaciones/SMTP son solo configuración guardada: no envían nada realmente.**
 
+### Menú de usuario y cambio de contraseña
+El encabezado muestra avatar + nombre + rol (`UserMenu`); al hacer clic: Cerrar sesión y Cambiar contraseña (el botón suelto de “Cerrar sesión” ya no existe). “Cambiar contraseña” pide actual, nueva y confirmación; reglas: ≥ 12 caracteres, no común/comprometida (lista corta, parte del correo, secuencias o caracteres repetidos), coincidir con la confirmación y distinta de la actual. `cambiarContrasena()` actualiza `ckl_users` y la copia en `ckl_user`. Las contraseñas demo de la sección 4 no cumplen los 12 caracteres: la regla solo aplica a las nuevas.
+
+### Dashboard
+El banner de comprobaciones atrasadas abre con saludo por hora (“Buenos días / Buenas tardes / Buenas noches {nombre}, tienes N comprobaciones atrasadas…”). Solo aparece si hay atrasadas.
+
 ### Pre-Registro y contraseñas
 Desde el login, un empleado envía un Pre-Registro (`ckl_prealtas`) que el admin procesa en Usuarios. (Se llamaba “Pre-Alta”; la etiqueta correcta de UI es **Pre-Registro**.) Recuperación: código de 6 dígitos válido 10 min, mostrado en pantalla.
 
@@ -137,7 +146,7 @@ Desde el login, un empleado envía un Pre-Registro (`ckl_prealtas`) que el admin
 
 ## 7. Historial reciente (para entender el estado actual)
 
-Últimas iteraciones: comprobación por concepto de transporte y alcance del gestor de vuelos; filas de transporte duplicadas corregidas; conteo/lista de “atrasadas” alineados; hotel manual por noche y folio diferido; detalle de autorización con desglose; Usuarios solo para admin; usuarios demo multi-sociedad; Automatizaciones (SMTP) en Configuración; sesión única por usuario; rediseño del Dashboard (gráfica mensual); fuente Jost; validación de cobertura de hoteles; diálogo bloqueante en lugar de toasts de error; etiquetas visibles Pendiente/Autorizado/Comprobado/Rechazado; vistas de tarjetas en móvil; Comprobación maestro-detalle con alcance por rol; arreglo de recarga con `cargando`; favicon vacío (evita 404).
+Últimas iteraciones: comprobación por concepto de transporte y alcance del gestor de vuelos; filas de transporte duplicadas corregidas; conteo/lista de “atrasadas” alineados; hotel manual por noche y folio diferido; detalle de autorización con desglose; Usuarios solo para admin; usuarios demo multi-sociedad; Automatizaciones (SMTP) en Configuración; sesión única por usuario; rediseño del Dashboard (gráfica mensual); fuente Jost; validación de cobertura de hoteles; diálogo bloqueante en lugar de toasts de error; etiquetas visibles Pendiente/Autorizado/Comprobado/Rechazado; vistas de tarjetas en móvil; Comprobación maestro-detalle con alcance por rol; arreglo de recarga con `cargando`; favicon vacío (evita 404); menú de usuario con cambio de contraseña; “Pago directo empresa” (Hotel + Avión) fuera del total a depositar; bloqueo de nuevas solicitudes con 2+ folios sin comprobar; saludo en el Dashboard.
 
 ## 8. Cómo pedirme cosas (preferencias para esta colaboración)
 

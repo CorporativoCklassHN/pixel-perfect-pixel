@@ -153,6 +153,14 @@ function MonthlyChart({ data }: { data: { mes: string; total: number }[] }) {
   );
 }
 
+// Saludo según la hora local: día (hasta las 11:59), tarde (12:00-18:59), noche.
+function saludoActual(date = new Date()) {
+  const h = date.getHours();
+  if (h < 12) return "Buenos días";
+  if (h < 19) return "Buenas tardes";
+  return "Buenas noches";
+}
+
 function Dashboard() {
   const { user, role } = useAuth();
   const allSolicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
@@ -232,9 +240,9 @@ function Dashboard() {
             </div>
             <div>
               <div className="font-bold">
-                {kpis.atrasados} comprobaci{kpis.atrasados === 1 ? "ón" : "ones"} atrasada
-                {kpis.atrasados === 1 ? "" : "s"}: más de {diasComprobacionAtrasada} días sin
-                comprobar
+                {saludoActual()} {user?.nombre}, tienes {kpis.atrasados} comprobaci
+                {kpis.atrasados === 1 ? "ón" : "ones"} atrasada{kpis.atrasados === 1 ? "" : "s"}: más
+                de {diasComprobacionAtrasada} días sin comprobar
               </div>
               <div className="text-sm" style={{ color: "var(--color-primary-hover)" }}>
                 Requieren atención inmediata antes del cierre contable.

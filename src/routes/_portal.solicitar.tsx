@@ -9,7 +9,7 @@ import { showErrorDialog } from "@/components/ErrorDialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  KEYS, lsGet, lsSet, fmtMoney, nextFolio, uid,
+  KEYS, lsGet, lsSet, fmtMoney, nextFolio, uid, bloqueoNuevaSolicitud,
   type Hotel, type Solicitud, type ComprobanteGasto, type Autorizacion,
 } from "@/lib/store";
 
@@ -142,6 +142,19 @@ function Solicitar() {
   // número, y si una de las dos no llega a guardar, ese folio se pierde. Se
   // calcula con nextFolio() justo antes de escribir en KEYS.solicitudes, así
   // que refleja lo que exista en ese momento (basado en la hora real de guardado).
+  // Una solicitud nueva (no edición) se bloquea si el usuario tiene 2 o más folios
+  // autorizados sin comprobar por completo: aplica aunque llegue por el menú lateral
+  // o por URL directa, no solo por el botón "Nueva solicitud".
+  useEffect(() => {
+    if (editId || !user) return;
+    const bloqueo = bloqueoNuevaSolicitud(user.id);
+    if (bloqueo) {
+      showErrorDialog(bloqueo);
+      nav({ to: "/comprobacion" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editId, user?.id]);
+
   const [folio, setFolio] = useState<string | null>(() => editing?.folio ?? null);
   const today = new Date().toLocaleDateString("es-MX");
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -182,6 +195,7 @@ function Solicitar() {
 
   const totals = useMemo(() => {
     let foraneo = 0,
+      avion = 0,
       local = 0,
       otros = 0,
       hotel = 0,
@@ -194,18 +208,28 @@ function Solicitar() {
         hotel += tarifa * nightsBetween(h.fecha_inicio, h.fecha_fin);
       }
       foraneo += d.foraneo.reduce((a, r) => a + (Number(r.monto) || 0), 0);
+      avion += d.foraneo
+        .filter((r) => r.tipo === "Avión")
+        .reduce((a, r) => a + (Number(r.monto) || 0), 0);
       local += d.local.reduce((a, r) => a + (Number(r.monto) || 0), 0);
       otros += d.otros.reduce((a, r) => a + (Number(r.monto) || 0), 0);
       diasTot += daysBetween(d.fecha_inicio, d.fecha_fin);
     }
     const comida = diasTot * config.monto_comida_diario * personas;
     const total = comida + foraneo + local + otros + hotel;
-    return { comida, foraneo, local, otros, hotel, total, diasTot };
+    // Hotel y Avión se pagan directo con la tarjeta corporativa: no se depositan al viajero.
+    const pagoDirecto = hotel + avion;
+    const deposito = total - pagoDirecto;
+    return { comida, foraneo, local, otros, hotel, avion, total, pagoDirecto, deposito, diasTot };
   }, [destinos, personas, config.monto_comida_diario]);
 
   const requiresFin = totals.total > config.umbral_finanzas;
 
   const guardar = () => {
+    if (!editing && user) {
+      const bloqueo = bloqueoNuevaSolicitud(user.id);
+      if (bloqueo) return showErrorDialog(bloqueo);
+    }
     if (!motivo.trim()) return showErrorDialog("Captura el motivo del viaje.");
     for (let i = 0; i < destinos.length; i++) {
       const d = destinos[i];
@@ -482,15 +506,20 @@ function Solicitar() {
 
       {/* Totals bar */}
       <div className="sticky bottom-0 z-20 -mx-4 border-t bg-white p-4 shadow-[0_-4px_24px_rgba(0,0,0,0.06)] md:-mx-6">
-        <div className="mx-auto grid max-w-6xl grid-cols-2 gap-3 md:grid-cols-6">
+        <div className="mx-auto grid max-w-6xl grid-cols-2 gap-3 md:grid-cols-7">
           <Tot label="Comida" v={totals.comida} />
           <Tot label="Trans. foráneo" v={totals.foraneo} />
           <Tot label="Trans. local" v={totals.local} />
           <Tot label="Otros" v={totals.otros} />
           <Tot label="Hotel" v={totals.hotel} />
+          <div title="Hotel + Avión: se pagan directo con la tarjeta corporativa y no se depositan al viajero">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Pago directo empresa</div>
+            <div className="text-xl font-bold" style={{ color: "#228B22" }}>{fmtMoney(totals.pagoDirecto)}</div>
+            <div className="text-[10px] text-muted-foreground">Hotel + Avión</div>
+          </div>
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total a depositar</div>
-            <div className="text-xl font-bold" style={{ color: "var(--color-primary)" }}>{fmtMoney(totals.total)}</div>
+            <div className="text-xl font-bold" style={{ color: "var(--color-primary)" }}>{fmtMoney(totals.deposito)}</div>
           </div>
         </div>
         <div className="mx-auto mt-3 flex max-w-6xl flex-wrap items-center justify-between gap-3">
