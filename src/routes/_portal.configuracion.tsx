@@ -6,6 +6,7 @@ import { useAuth, useLocalStorage } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
 import {
   KEYS,
+  registrarLog,
   type Sociedad,
   type Role,
   type User,
@@ -52,6 +53,7 @@ type Config = {
   smtp_cifrado: string;
   notif_plataforma_activo: boolean;
   revision_automatica_activo: boolean;
+  bloquear_folio_monto_hotel: boolean;
 };
 
 const CONFIG_DEFAULTS: Config = {
@@ -71,6 +73,7 @@ const CONFIG_DEFAULTS: Config = {
   smtp_cifrado: "TLS",
   notif_plataforma_activo: true,
   revision_automatica_activo: true,
+  bloquear_folio_monto_hotel: false,
 };
 
 // Vista de apoyo (solo lectura): correos informativos "enviados" (simulados, aún sin
@@ -175,7 +178,7 @@ function BitacoraNotificaciones() {
 }
 
 function Configuracion() {
-  const { hasPerm, role } = useAuth();
+  const { hasPerm, role, user } = useAuth();
   const [config, setConfig] = useLocalStorage<Config>(KEYS.config, CONFIG_DEFAULTS);
   const [sociedades, setSociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
   const [roles, setRoles] = useLocalStorage<Role[]>(KEYS.roles, []);
@@ -188,7 +191,19 @@ function Configuracion() {
     return <div className="ckl-card p-8 text-center text-sm">Sin permiso para acceder.</div>;
   }
 
-  const saveCfg = () => { setConfig(draft); toast.success("Configuración guardada."); };
+  const saveCfg = () => {
+    // El bloqueo por monto de hotel queda en la bitácora cuando cambia.
+    const antes = !!config.bloquear_folio_monto_hotel;
+    const despues = !!draft.bloquear_folio_monto_hotel;
+    if (antes !== despues) {
+      registrarLog("config_bloqueo_monto_hotel", "config", "bloquear_folio_monto_hotel", user?.id ?? null, {
+        antes,
+        despues,
+      });
+    }
+    setConfig(draft);
+    toast.success("Configuración guardada.");
+  };
 
   const saveSoc = (s: Sociedad) => {
     if (s.id === 0) {
@@ -239,6 +254,32 @@ function Configuracion() {
             </select>
           </div>
           <div><label className="ckl-label">Email compras</label><input className="ckl-input" value={draft.email_compras} onChange={(e) => setDraft({ ...draft, email_compras: e.target.value })} /></div>
+          <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
+            <div>
+              <div className="text-sm font-semibold">Bloquear folio por cambio de monto en hotel</div>
+              <div className="text-xs text-muted-foreground">
+                Si está activo, un folio con monto manual de hotel pendiente de revisión de Compras, o
+                rechazado por Compras, no se puede autorizar. Desactivado: la revisión es solo
+                informativa.
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!!draft.bloquear_folio_monto_hotel}
+              aria-label="Bloquear folio por cambio de monto en hotel"
+              onClick={() =>
+                setDraft({ ...draft, bloquear_folio_monto_hotel: !draft.bloquear_folio_monto_hotel })
+              }
+              className="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
+              style={{ background: draft.bloquear_folio_monto_hotel ? "var(--color-primary)" : "#ccc" }}
+            >
+              <span
+                className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
+                style={{ transform: draft.bloquear_folio_monto_hotel ? "translateX(18px)" : "translateX(2px)" }}
+              />
+            </button>
+          </div>
         </div>
         <button onClick={saveCfg} className="ckl-btn-primary mt-4">Guardar</button>
       </div>

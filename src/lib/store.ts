@@ -589,6 +589,9 @@ const SEED_CONFIG = {
   smtp_cifrado: "TLS",
   notif_plataforma_activo: true,
   revision_automatica_activo: true,
+  // Parámetro del administrador: si está activo, un folio con monto manual de hotel
+  // pendiente de revisión (o rechazado por Compras) no puede autorizarse.
+  bloquear_folio_monto_hotel: false,
 };
 
 const SEED_ORIGENES = ["Guadalajara", "Ciudad de México", "Monterrey", "León", "Querétaro"];
@@ -1469,6 +1472,9 @@ export type RevisionMontoManual = {
   fecha_fin: string;
   creada_at: string; // ISO con hora
   estado: "pendiente" | "aceptado" | "rechazado";
+  // false cuando una edición de la solicitud la dejó sin efecto (otro hotel/monto): ya no
+  // se muestra en la campanita ni bloquea el folio. Ausente = vigente.
+  vigente?: boolean;
   decidido_por?: string;
   decidido_at?: string; // ISO con hora
   comentario?: string;
@@ -1532,7 +1538,31 @@ export function fechaLocal(iso: string) {
 // Una revisión se muestra mientras esté pendiente y, una vez resuelta, solo durante
 // el día en que se resolvió: al día siguiente desaparece de la lista.
 export function revisionVisible(r: RevisionMontoManual, hoy: string = hoyLocal()) {
+  if (r.vigente === false) return false;
   return r.estado === "pendiente" || (!!r.decidido_at && fechaLocal(r.decidido_at) === hoy);
+}
+
+// Bloqueo de autorización por monto manual de hotel (parámetro de Configuración
+// "bloquear_folio_monto_hotel"). Devuelve el motivo si el folio está bloqueado o null.
+// Pendiente de Compras → bloqueado; rechazado por Compras → bloqueado hasta que el
+// solicitante edite la solicitud (la edición deja sin efecto la revisión rechazada);
+// aceptado → libre. Con el parámetro apagado (por omisión) nunca bloquea.
+export function bloqueoMontoHotel(
+  solicitudId: string,
+  revisiones: RevisionMontoManual[],
+  config: { bloquear_folio_monto_hotel?: boolean },
+): string | null {
+  if (!config.bloquear_folio_monto_hotel) return null;
+  const vigentes = revisiones.filter((r) => r.solicitud_id === solicitudId && r.vigente !== false);
+  const rechazada = vigentes.find((r) => r.estado === "rechazado");
+  if (rechazada) {
+    return `Bloqueado: Compras rechazó el monto manual de hotel (${rechazada.hotel_nombre}). El solicitante debe editar la solicitud.`;
+  }
+  const pendiente = vigentes.find((r) => r.estado === "pendiente");
+  if (pendiente) {
+    return `Bloqueado: el monto manual de hotel (${pendiente.hotel_nombre}) está pendiente de revisión de Compras.`;
+  }
+  return null;
 }
 
 // Usuarios activos cuyo rol puede revisar montos manuales (Compras Corporativas y Compras Corp).
@@ -1605,6 +1635,8 @@ export function crearRevisionesMontoManual(
   const nuevas: RevisionMontoManual[] = [];
   // Pendientes que siguen vigentes (mismo hotel y monto): se conservan tal cual, sin avisar de nuevo.
   const conservadas: RevisionMontoManual[] = [];
+  // Resueltas que siguen aplicando a la solicitud tal como quedó (mismo hotel y monto).
+  const resueltasVigentes: string[] = [];
   for (const d of destinos) {
     for (const h of d.hoteles) {
       if (!h.manual || !(Number(h.monto) > 0)) continue;
@@ -1620,7 +1652,11 @@ export function crearRevisionesMontoManual(
         conservadas.push(previa);
         continue;
       }
-      if (resueltas.some(igual)) continue;
+      const previaResuelta = resueltas.find(igual);
+      if (previaResuelta) {
+        resueltasVigentes.push(previaResuelta.id);
+        continue;
+      }
       nuevas.push({
         id: uid("rev_"),
         solicitud_id: sol.id,
@@ -1641,10 +1677,26 @@ export function crearRevisionesMontoManual(
     }
   }
 
-  // Hubo cambio si se descartaron pendientes anteriores o si hay revisiones nuevas.
+  // Las resueltas que ya no corresponden a lo guardado (se cambió hotel/monto) quedan sin vigencia.
+  const idsVigentes = new Set([
+    ...conservadas.map((r) => r.id),
+    ...resueltasVigentes,
+    ...nuevas.map((r) => r.id),
+  ]);
+  let cambioVigencia = false;
+  const restoActualizado = resto.map((r) => {
+    if (r.solicitud_id !== sol.id) return r;
+    const vigente = idsVigentes.has(r.id);
+    if ((r.vigente !== false) === vigente) return r;
+    cambioVigencia = true;
+    return { ...r, vigente };
+  });
+  // Hubo cambio si se descartaron pendientes anteriores, hay revisiones nuevas o cambió la vigencia.
   const cambioPendientes =
-    existentes.length !== resto.length + conservadas.length || nuevas.length > 0;
-  if (cambioPendientes) lsSet(KEYS.revisionesMonto, [...nuevas, ...conservadas, ...resto]);
+    existentes.length !== resto.length + conservadas.length || nuevas.length > 0 || cambioVigencia;
+  if (cambioPendientes) {
+    lsSet(KEYS.revisionesMonto, [...nuevas, ...conservadas, ...restoActualizado]);
+  }
   if (!nuevas.length) return [];
 
   const config = lsGet<{ notif_email_activo?: boolean }>(KEYS.config, {});

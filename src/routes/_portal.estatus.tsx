@@ -11,6 +11,7 @@ import {
   Eye,
   ReceiptText,
   CheckCircle2,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
@@ -24,6 +25,7 @@ import {
   filterSolicitudesByOwnership,
   avanceComprobacion,
   avanceValidacion,
+  bloqueoMontoHotel,
   estatusVisible,
   type RevisionMontoManual,
   ESTATUS_VISIBLES,
@@ -125,6 +127,17 @@ function Estatus() {
   // Marca de "Validado por Compras" (todos los conceptos validados) junto al estatus.
   const estaValidado = (solicitudId: string) =>
     avanceValidacion(comprobantesGasto, solicitudId).completa;
+  // Folio bloqueado para autorizar por monto manual de hotel (si el parámetro está activo).
+  const bloqueoDe = (s: Solicitud) =>
+    s.estatus === "Abierto" ? bloqueoMontoHotel(s.id, revisionesMonto, config) : null;
+  const marcaBloqueo = (s: Solicitud) => {
+    const motivo = bloqueoDe(s);
+    return motivo ? (
+      <span className="ml-1 inline-flex align-middle" style={{ color: "#B45309" }} title={motivo}>
+        <Lock size={14} />
+      </span>
+    ) : null;
+  };
   const marcaValidado = (s: Solicitud) =>
     s.estatus === "Cerrado" && estaValidado(s.id) ? (
       <span
@@ -226,6 +239,8 @@ function Estatus() {
   const authorize = (s: Solicitud) => {
     const which = canAuth(s);
     if (!which) return;
+    const bloqueo = bloqueoDe(s);
+    if (bloqueo) return showErrorDialog(bloqueo);
     const newAuth: Autorizacion = {
       id: uid("a_"), solicitud_id: s.id,
       rol_autorizador: which === "jefe" ? "jefe_inmediato" : "finanzas",
@@ -368,6 +383,7 @@ function Estatus() {
                       <span className="inline-flex items-center">
                         <StatusBadge estatus={s.estatus} comprobado={estaComprobado(s.id)} />
                         {marcaValidado(s)}
+                        {marcaBloqueo(s)}
                       </span>
                     </div>
                     <div className="mt-1 flex items-baseline justify-between gap-2">
@@ -449,7 +465,7 @@ function Estatus() {
                         : <span className="ckl-badge" style={{ background: "#FEE2E2", color: "#DC2626" }}>Sin cargar</span>}
                     </td>
                     <td className="p-3">{s.nota_rechazo && <MessageSquareWarning size={16} className="text-[color:var(--color-primary)]" />}</td>
-                    <td className="p-3 whitespace-nowrap"><StatusBadge estatus={s.estatus} comprobado={estaComprobado(s.id)} />{marcaValidado(s)}</td>
+                    <td className="p-3 whitespace-nowrap"><StatusBadge estatus={s.estatus} comprobado={estaComprobado(s.id)} />{marcaValidado(s)}{marcaBloqueo(s)}</td>
                   </tr>
                 );
               })}
@@ -534,7 +550,7 @@ function Estatus() {
                         // El monto de la estancia (de catálogo o manual) siempre es por noche.
                         const subtotal = noches * h.monto;
                         const rev = revisionesMonto.find(
-                          (r) => r.solicitud_id === detail.id && r.hotel_stay_id === h.id,
+                          (r) => r.solicitud_id === detail.id && r.hotel_stay_id === h.id && r.vigente !== false,
                         );
                         return (
                           <div key={h.id} className="mt-1">
@@ -620,6 +636,16 @@ function Estatus() {
             </div>
           )}
 
+          {bloqueoDe(detail) && (
+            <div
+              className="mt-4 flex items-start gap-2 rounded-md p-3 text-xs"
+              style={{ background: "#FEF3C7", color: "#92400E" }}
+            >
+              <Lock size={14} className="mt-0.5 shrink-0" />
+              <span>{bloqueoDe(detail)}</span>
+            </div>
+          )}
+
           <div className="mt-5 flex flex-wrap justify-end gap-2">
             {canEdit(detail) && (
               <>
@@ -654,7 +680,14 @@ function Estatus() {
             {canAuth(detail) && (
               <>
                 <button onClick={() => setRejecting(detail)} className="ckl-btn-outline"><X size={14} /> Rechazar</button>
-                <button onClick={() => authorize(detail)} className="ckl-btn-primary"><Check size={14} /> Autorizar</button>
+                <button
+                  onClick={() => authorize(detail)}
+                  disabled={!!bloqueoDe(detail)}
+                  title={bloqueoDe(detail) ?? undefined}
+                  className="ckl-btn-primary"
+                >
+                  <Check size={14} /> Autorizar
+                </button>
               </>
             )}
             {hasPerm("configurar_permisos") && autorizaciones.some((a) => a.solicitud_id === detail.id) && (
