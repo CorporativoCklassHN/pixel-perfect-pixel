@@ -20,6 +20,7 @@ import {
   filterSolicitudesByOwnership,
   uid,
   avanceComprobacion,
+  avanceValidacion,
   type Solicitud,
   type ComprobanteGasto,
   type Sociedad,
@@ -89,8 +90,26 @@ function descargarFactura(f: Factura) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+const RENGLON_BG: Record<string, string> = {
+  comprobado: "#D8F3DC",
+  parcialmente_comprobado: "#DBEAFE",
+  pendiente: "#FEF3C7",
+  no_aplica: "#F1F3F5",
+};
+const RENGLON_FG: Record<string, string> = {
+  comprobado: "#2D6A4F",
+  parcialmente_comprobado: "#1D4ED8",
+  pendiente: "#B45309",
+  no_aplica: "#666",
+};
+
 function Comprobacion() {
-  const { user, role } = useAuth();
+  const { user, role, hasPerm } = useAuth();
+  // Compras Corporativas (validar_comprobacion, sin comprobar) revisa folios ya
+  // comprobados: no sube ni elimina facturas, solo marca Validado y deja Notas.
+  const puedeComprobar = hasPerm("comprobar");
+  const validador = hasPerm("validar_comprobacion");
+  const soloValidador = validador && !puedeComprobar;
   // Gestor de vuelos solo debe ver/comprobar el concepto "Avión" de cada
   // folio — el resto (Hotel, Transporte foráneo terrestre, Transporte local,
   // Comida, Otros) y las secciones de No deducibles/Depósito sobrante no le
@@ -105,9 +124,10 @@ function Comprobacion() {
   );
   const [facturas, setFacturas] = useLocalStorage<Factura[]>(KEYS.facturasXml, []);
   // Alcance por rol: el usuario solo ve sus folios; ver_equipo/ver_todo amplían.
-  const cerradas = filterSolicitudesByOwnership(user, role, solicitudes, users).filter(
-    (s) => s.estatus === "Cerrado",
-  );
+  // El validador solo ve folios comprobados por completo (los que ya puede revisar).
+  const cerradas = filterSolicitudesByOwnership(user, role, solicitudes, users)
+    .filter((s) => s.estatus === "Cerrado")
+    .filter((s) => !soloValidador || avanceComprobacion(comprobantes, s.id).completo);
   const nav = useNavigate();
   const { solicitudId } = Route.useSearch();
   const [sidState, setSid] = useState<string>(() =>
@@ -222,6 +242,31 @@ function Comprobacion() {
     inp.click();
   };
 
+  // ── Validación de Compras Corporativas
+  const actualizarRenglon = (id: string, patch: Partial<ComprobanteGasto>) =>
+    setComprobantes(comprobantes.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+
+  const toggleValidado = (r: ComprobanteGasto) => {
+    if (r.validado) {
+      actualizarRenglon(r.id, { validado: false, validado_por: undefined, validado_fecha: undefined });
+      toast.success(`Validación de "${r.concepto}" retirada.`);
+    } else {
+      actualizarRenglon(r.id, {
+        validado: true,
+        validado_por: user?.id,
+        validado_fecha: new Date().toISOString().slice(0, 10),
+      });
+      toast.success(`"${r.concepto}" validado.`);
+    }
+  };
+
+  const guardarNota = (r: ComprobanteGasto, texto: string) => {
+    const t = texto.trim();
+    if ((r.nota_validacion ?? "") === t) return;
+    actualizarRenglon(r.id, { nota_validacion: t || undefined });
+    toast.success("Nota guardada.");
+  };
+
   const removeFactura = (id: string) => {
     const f = facturas.find((x) => x.id === id);
     setFacturas(facturas.filter((x) => x.id !== id));
@@ -232,6 +277,10 @@ function Comprobacion() {
           const nuevo = Math.max(0, c.monto_comprobado - f.monto_aplicado);
           return {
             ...c,
+            // Si el renglón deja de estar completo, la validación de Compras ya no aplica.
+            ...(nuevo < c.monto_solicitado
+              ? { validado: false, validado_por: undefined, validado_fecha: undefined }
+              : {}),
             monto_comprobado: nuevo,
             status_renglon:
               nuevo <= 0
@@ -249,7 +298,9 @@ function Comprobacion() {
   if (!sel)
     return (
       <div className="ckl-card p-8 text-center text-sm text-muted-foreground">
-        No hay solicitudes cerradas para comprobar.
+        {soloValidador
+          ? "No hay folios comprobados por validar."
+          : "No hay solicitudes cerradas para comprobar."}
       </div>
     );
 
@@ -263,6 +314,105 @@ function Comprobacion() {
   // verde los que ya están completos.
   const avanceDe = (solicitudId: string) =>
     avanceComprobacion(comprobantes, solicitudId, soloAvion);
+  const validacionDe = (solicitudId: string) => avanceValidacion(comprobantes, solicitudId);
+  const validacion = validacionDe(sid);
+  const insignia = !comprobado
+    ? { texto: "Pendiente de comprobar", bg: "#FEF3C7", fg: "#B45309" }
+    : validacion.completa
+      ? { texto: "Validado por Compras", bg: "#BBF7D0", fg: "#14532D" }
+      : { texto: soloValidador ? "Por validar" : "Comprobado", bg: "#D8F3DC", fg: "#2D6A4F" };
+  const duenoDe = (s: Solicitud) => users.find((u) => u.id === s.user_id)?.nombre ?? "—";
+  const nombreDe = (id?: string) => users.find((u) => u.id === id)?.nombre ?? "Compras";
+  // Un renglón solo se puede validar cuando ya está comprobado por completo.
+  const validable = (r: ComprobanteGasto) => r.monto_solicitado > 0 && r.status_renglon === "comprobado";
+
+  const celdaValidado = (r: ComprobanteGasto) => {
+    if (validador && validable(r)) {
+      return (
+        <label className="inline-flex cursor-pointer items-center p-1.5" title="Marcar como validado">
+          <input
+            type="checkbox"
+            className="h-5 w-5 cursor-pointer accent-[#2D6A4F]"
+            checked={!!r.validado}
+            onChange={() => toggleValidado(r)}
+            aria-label={`Validar ${r.concepto}`}
+          />
+        </label>
+      );
+    }
+    return r.validado ? (
+      <span
+        className="inline-flex items-center gap-1 text-xs font-semibold"
+        style={{ color: "#2D6A4F" }}
+        title={`Validado por ${nombreDe(r.validado_por)}${r.validado_fecha ? " el " + r.validado_fecha : ""}`}
+      >
+        <CheckCircle2 size={16} /> Validado
+      </span>
+    ) : (
+      <span className="text-xs text-muted-foreground">—</span>
+    );
+  };
+
+  const celdaNota = (r: ComprobanteGasto) => {
+    if (validador && validable(r)) {
+      return (
+        <input
+          // key con la nota guardada: el campo se refresca si cambia desde otro lado
+          key={r.id + "|" + (r.nota_validacion ?? "")}
+          className="ckl-input min-w-[150px]"
+          defaultValue={r.nota_validacion ?? ""}
+          placeholder="Observación (opcional)"
+          maxLength={300}
+          onBlur={(e) => guardarNota(r, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+          }}
+        />
+      );
+    }
+    return r.nota_validacion ? (
+      <span
+        className="inline-block max-w-[260px] rounded px-2 py-1 text-xs"
+        style={{ background: "#FEF3C7", color: "#92400E" }}
+      >
+        {r.nota_validacion}
+      </span>
+    ) : (
+      <span className="text-xs text-muted-foreground">—</span>
+    );
+  };
+
+  const botonesAdjuntar = (r: ComprobanteGasto) => {
+    const cerrado = r.status_renglon === "comprobado" || r.status_renglon === "no_aplica";
+    if (cerrado || !puedeComprobar) return <span className="text-xs text-muted-foreground">—</span>;
+    return (
+      <div className="flex gap-1">
+        <button
+          title={`Adjuntar XML para ${r.concepto}`}
+          onClick={() => onFile("XML", r)}
+          className="rounded p-1.5 hover:bg-secondary"
+          style={{ color: "var(--color-primary)" }}
+        >
+          <FileCode size={15} />
+        </button>
+        <button
+          title={`Adjuntar PDF para ${r.concepto}`}
+          onClick={() => onFile("PDF", r)}
+          className="rounded p-1.5 text-muted-foreground hover:bg-secondary"
+        >
+          <FileText size={15} />
+        </button>
+      </div>
+    );
+  };
+  const badgeRenglon = (r: ComprobanteGasto) => (
+    <span
+      className="ckl-badge"
+      style={{ background: RENGLON_BG[r.status_renglon], color: RENGLON_FG[r.status_renglon] }}
+    >
+      {r.status_renglon.replace(/_/g, " ")}
+    </span>
+  );
 
   return (
     <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-start">
@@ -270,29 +420,85 @@ function Comprobacion() {
         solicitudes={cerradas}
         selectedId={sid}
         avanceDe={avanceDe}
+        validacionDe={validacionDe}
+        soloValidador={soloValidador}
+        duenoDe={new Set(cerradas.map((c) => c.user_id)).size > 1 ? duenoDe : undefined}
         onSelect={selectFolio}
       />
       <div className="min-w-0 space-y-5">
       <div className="ckl-card p-4 text-xs text-muted-foreground">
-        <span className="text-sm font-semibold text-foreground">{sel.folio}</span> · {sel.empresa} ·{" "}
-        {sel.tipo_viaje} · {sel.fecha}
+        <span className="text-sm font-semibold text-foreground">{sel.folio}</span> · {duenoDe(sel)} ·{" "}
+        {sel.empresa} · {sel.tipo_viaje} · {sel.fecha}
       </div>
 
       {/* Tabla */}
       <div className="ckl-card overflow-hidden">
-        <div className="flex items-center justify-between border-b p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
           <span className="text-sm font-semibold">Tabla de comprobación</span>
-          <span
-            className="ckl-badge"
-            style={{
-              background: comprobado ? "#D8F3DC" : "#FEF3C7",
-              color: comprobado ? "#2D6A4F" : "#B45309",
-            }}
-          >
-            {comprobado ? "Comprobado" : "Pendiente de comprobar"}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            {comprobado && validacion.total > 0 && (
+              <span className="text-xs text-muted-foreground">
+                Validados {validacion.validados} de {validacion.total}
+              </span>
+            )}
+            <span className="ckl-badge" style={{ background: insignia.bg, color: insignia.fg }}>
+              {insignia.texto}
+            </span>
+          </div>
         </div>
-        <div className="overflow-x-auto">
+        {soloValidador && (
+          <p className="border-b bg-secondary/50 px-4 py-2 text-xs text-muted-foreground">
+            Revisa las facturas en <b>Facturas cargadas</b> (ver / descargar), marca <b>Validado</b>{" "}
+            en cada concepto cuando sean correctas y deja una <b>Nota</b> si hay observaciones.
+          </p>
+        )}
+
+        {/* Móvil (< 768 px): tarjetas apiladas en lugar de tabla de 8 columnas. */}
+        <ul className="divide-y md:hidden">
+          {rows.map((r) => {
+            const dif = r.monto_comprobado - r.monto_solicitado;
+            return (
+              <li key={r.id} className="space-y-2 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">{r.concepto}</span>
+                  {badgeRenglon(r)}
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <div className="text-muted-foreground">Solicitado</div>
+                    <div className="font-semibold">{fmtMoney(r.monto_solicitado)}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Comprobado</div>
+                    <div className="font-semibold">{fmtMoney(r.monto_comprobado)}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Dif.</div>
+                    <div className="font-semibold" style={{ color: dif < 0 ? "#E30613" : "#2D6A4F" }}>
+                      {fmtMoney(dif)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Validado</span>
+                    {celdaValidado(r)}
+                  </div>
+                  {!soloValidador && botonesAdjuntar(r)}
+                </div>
+                <div>{celdaNota(r)}</div>
+              </li>
+            );
+          })}
+          <li className="flex justify-between bg-secondary p-3 text-sm font-semibold">
+            <span>Totales</span>
+            <span>
+              {fmtMoney(totComp)} / {fmtMoney(totSol)}
+            </span>
+          </li>
+        </ul>
+
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead className="bg-secondary text-left text-xs text-muted-foreground">
               <tr>
@@ -301,26 +507,14 @@ function Comprobacion() {
                 <th className="p-3 text-right">Comprobado</th>
                 <th className="p-3 text-right">Dif.</th>
                 <th className="p-3">Estatus</th>
-                <th className="p-3">Adjuntar</th>
+                <th className="p-3">Validado</th>
+                <th className="p-3">Nota</th>
+                {!soloValidador && <th className="p-3">Adjuntar</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => {
                 const dif = r.monto_comprobado - r.monto_solicitado;
-                const bg: Record<string, string> = {
-                  comprobado: "#D8F3DC",
-                  parcialmente_comprobado: "#DBEAFE",
-                  pendiente: "#FEF3C7",
-                  no_aplica: "#F1F3F5",
-                };
-                const fg: Record<string, string> = {
-                  comprobado: "#2D6A4F",
-                  parcialmente_comprobado: "#1D4ED8",
-                  pendiente: "#B45309",
-                  no_aplica: "#666",
-                };
-                const cerrado =
-                  r.status_renglon === "comprobado" || r.status_renglon === "no_aplica";
                 return (
                   <tr key={r.id} className="border-t">
                     <td className="p-3">{r.concepto}</td>
@@ -332,37 +526,10 @@ function Comprobacion() {
                     >
                       {fmtMoney(dif)}
                     </td>
-                    <td className="p-3">
-                      <span
-                        className="ckl-badge"
-                        style={{ background: bg[r.status_renglon], color: fg[r.status_renglon] }}
-                      >
-                        {r.status_renglon.replace(/_/g, " ")}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      {cerrado ? (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      ) : (
-                        <div className="flex gap-1">
-                          <button
-                            title={`Adjuntar XML para ${r.concepto}`}
-                            onClick={() => onFile("XML", r)}
-                            className="rounded p-1.5 hover:bg-secondary"
-                            style={{ color: "var(--color-primary)" }}
-                          >
-                            <FileCode size={15} />
-                          </button>
-                          <button
-                            title={`Adjuntar PDF para ${r.concepto}`}
-                            onClick={() => onFile("PDF", r)}
-                            className="rounded p-1.5 text-muted-foreground hover:bg-secondary"
-                          >
-                            <FileText size={15} />
-                          </button>
-                        </div>
-                      )}
-                    </td>
+                    <td className="p-3">{badgeRenglon(r)}</td>
+                    <td className="p-3">{celdaValidado(r)}</td>
+                    <td className="p-3">{celdaNota(r)}</td>
+                    {!soloValidador && <td className="p-3">{botonesAdjuntar(r)}</td>}
                   </tr>
                 );
               })}
@@ -373,6 +540,8 @@ function Comprobacion() {
                 <td className="p-3 text-right">{fmtMoney(totComp - totSol)}</td>
                 <td></td>
                 <td></td>
+                <td></td>
+                {!soloValidador && <td></td>}
               </tr>
             </tbody>
           </table>
@@ -380,6 +549,7 @@ function Comprobacion() {
       </div>
 
       {/* Validación */}
+      {puedeComprobar && (
       <div className="ckl-card p-4">
         <div className="text-sm font-semibold">Validación de comprobantes</div>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -398,6 +568,8 @@ function Comprobacion() {
           </div>
         </div>
       </div>
+
+      )}
 
       <div className="ckl-card overflow-hidden">
         <div className="border-b p-4 text-sm font-semibold">Facturas cargadas</div>
@@ -442,9 +614,11 @@ function Comprobacion() {
                     <button title="Descargar" aria-label="Descargar" className="rounded p-2 hover:bg-secondary" onClick={() => descargarFactura(f)}>
                       <Download size={16} />
                     </button>
-                    <button title="Eliminar" aria-label="Eliminar" className="rounded p-2 hover:bg-secondary" onClick={() => removeFactura(f.id)}>
-                      <Trash2 size={16} />
-                    </button>
+                    {puedeComprobar && (
+                      <button title="Eliminar" aria-label="Eliminar" className="rounded p-2 hover:bg-secondary" onClick={() => removeFactura(f.id)}>
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
                 </div>
               </li>
@@ -514,13 +688,15 @@ function Comprobacion() {
                         >
                           <Download size={14} />
                         </button>
-                        <button
-                          title="Eliminar"
-                          className="rounded p-1 hover:bg-secondary"
-                          onClick={() => removeFactura(f.id)}
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        {puedeComprobar && (
+                          <button
+                            title="Eliminar"
+                            className="rounded p-1 hover:bg-secondary"
+                            onClick={() => removeFactura(f.id)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -531,7 +707,7 @@ function Comprobacion() {
         </div>
       </div>
 
-      {!soloAvion && (
+      {!soloAvion && puedeComprobar && (
         <div className="grid gap-5 lg:grid-cols-2">
           <div className="ckl-card p-4">
             <div className="text-sm font-semibold">No deducibles</div>
@@ -575,11 +751,17 @@ function FolioPicker({
   solicitudes,
   selectedId,
   avanceDe,
+  validacionDe,
+  soloValidador,
+  duenoDe,
   onSelect,
 }: {
   solicitudes: Solicitud[];
   selectedId: string;
   avanceDe: (solicitudId: string) => ReturnType<typeof avanceComprobacion>;
+  validacionDe: (solicitudId: string) => ReturnType<typeof avanceValidacion>;
+  soloValidador: boolean;
+  duenoDe?: (s: Solicitud) => string;
   onSelect: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
@@ -596,7 +778,13 @@ function FolioPicker({
 
   const renderCard = (s: Solicitud) => {
     const a = avanceDe(s.id);
+    const v = validacionDe(s.id);
     const activo = s.id === selectedId;
+    const tag = !a.completo
+      ? { t: "Pendiente", bg: "#FEF3C7", fg: "#B45309" }
+      : v.completa
+        ? { t: "Validado", bg: "#BBF7D0", fg: "#14532D" }
+        : { t: soloValidador ? "Por validar" : "Comprobado", bg: "#D8F3DC", fg: "#2D6A4F" };
     return (
       <div
         className="w-full rounded-lg border p-3 text-left"
@@ -609,15 +797,13 @@ function FolioPicker({
           <span className="font-mono text-xs font-semibold">{s.folio}</span>
           <span
             className="ckl-badge"
-            style={{
-              background: a.completo ? "#D8F3DC" : "#FEF3C7",
-              color: a.completo ? "#2D6A4F" : "#B45309",
-            }}
+            style={{ background: tag.bg, color: tag.fg }}
           >
-            {a.completo && <CheckCircle2 size={11} />}[{a.completo ? "Comprobado" : "Pendiente"}]
+            {a.completo && <CheckCircle2 size={11} />}[{tag.t}]
           </span>
         </div>
         <div className="mt-1 truncate text-sm font-medium">{s.destino_resumen}</div>
+        {duenoDe && <div className="truncate text-xs text-muted-foreground">{duenoDe(s)}</div>}
         <div className="mt-0.5 flex items-center justify-between text-xs text-muted-foreground">
           <span>{s.fecha}</span>
           <span className="font-semibold text-foreground">{fmtMoney(s.monto_total)}</span>

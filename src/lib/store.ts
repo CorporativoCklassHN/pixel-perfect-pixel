@@ -94,6 +94,11 @@ export type ComprobanteGasto = {
   monto_solicitado: number;
   monto_comprobado: number;
   status_renglon: "comprobado" | "parcialmente_comprobado" | "pendiente" | "no_aplica";
+  // Validación de Compras Corporativas (opcionales: datos anteriores no los traen).
+  validado?: boolean;
+  validado_por?: string;
+  validado_fecha?: string;
+  nota_validacion?: string;
 };
 
 export function lsGet<T>(key: string, defaultValue: T): T {
@@ -197,6 +202,8 @@ const SEED_ROLES: Role[] = [
     // Mismos permisos que finanzas.
     id: 6, nombre: "compras_corporativas",
     permisos: {
+      // Revisa que las facturas de los folios ya comprobados sean reales (Comprobación → Validado/Nota).
+      validar_comprobacion: true,
       solicitar: true, ver_propio: true, comprobar: false,
       ver_equipo: false, ver_todo: true,
       autorizar_lte5000: false, autorizar_gt5000: true,
@@ -612,6 +619,8 @@ export function initSeed() {
   backfillDestinoDetalle();
   backfillEmpleadosMultiSociedad();
   backfillEscenariosComprobacion();
+  backfillValidarComprobacion();
+  backfillEscenariosValidacion();
   backfillFolioCollisions();
   backfillGestorVuelosComprobar();
   backfillDesgloseTransportePorTipo();
@@ -709,6 +718,7 @@ function backfillDesgloseTransportePorTipo() {
               ? "parcialmente_comprobado"
               : "pendiente";
       const nuevo: ComprobanteGasto = {
+        ...(prev ?? {}),
         id: prev?.id ?? uid("cg_"),
         solicitud_id: c.solicitud_id,
         concepto,
@@ -1140,4 +1150,290 @@ export function cambiarContrasena(
   const sesion = lsGet<User | null>(KEYS.user, null);
   if (sesion && sesion.id === userId) lsSet(KEYS.user, actualizado);
   return "ok";
+}
+
+// ───────── Validación de Compras Corporativas ─────────
+// Compras revisa, concepto por concepto, que las facturas de un folio ya
+// comprobado por completo sean reales (casilla "Validado" + "Nota" opcional).
+// Solo cuentan los renglones con monto solicitado > 0 (un renglón en $0 no tiene
+// factura que validar).
+export function avanceValidacion(comprobantes: ComprobanteGasto[], solicitudId: string) {
+  const filas = comprobantes.filter(
+    (c) => c.solicitud_id === solicitudId && c.monto_solicitado > 0,
+  );
+  const validados = filas.filter((c) => c.validado).length;
+  return {
+    total: filas.length,
+    validados,
+    completa: filas.length > 0 && validados === filas.length,
+  };
+}
+
+// Los roles guardados antes de que existiera "validar_comprobacion" no lo traen: se
+// le da a Compras Corporativas sin tocar el resto de sus permisos (ni los ajustes
+// que el admin ya haya hecho en la matriz de Permisos).
+//
+// Aplica a "compras_corporativas" y también a roles de Compras creados a mano desde
+// Configuración (p. ej. "compras_corp"): cualquier rol cuyo nombre empiece con "compras"
+// y que aún no tenga la clave. Si el admin ya la definió (true o false) no se toca.
+function backfillValidarComprobacion() {
+  const roles = lsGet<Role[]>(KEYS.roles, []);
+  const esCompras = (r: Role) => r.nombre.trim().toLowerCase().startsWith("compras");
+  if (!roles.some((r) => esCompras(r) && !("validar_comprobacion" in r.permisos))) return;
+  lsSet(
+    KEYS.roles,
+    roles.map((r) =>
+      esCompras(r) && !("validar_comprobacion" in r.permisos)
+        ? { ...r, permisos: { ...r.permisos, validar_comprobacion: true } }
+        : r,
+    ),
+  );
+}
+
+// ── Escenarios de ejemplo: folios comprobados al 100% con sus facturas cargadas ──
+function utf8ToBase64(texto: string) {
+  return btoa(unescape(encodeURIComponent(texto)));
+}
+
+function fakeXmlDataUrl(o: {
+  emisor: string;
+  emisorRfc: string;
+  receptor: string;
+  receptorRfc: string;
+  total: number;
+  uuid: string;
+  fecha: string;
+  concepto: string;
+}) {
+  const subtotal = (o.total / 1.16).toFixed(2);
+  const xml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" Version="4.0" Serie="A" Folio="${o.uuid.slice(0, 6)}" Fecha="${o.fecha}T10:30:00" Moneda="MXN" SubTotal="${subtotal}" Total="${o.total.toFixed(2)}" TipoDeComprobante="I">`,
+    `  <cfdi:Emisor Rfc="${o.emisorRfc}" Nombre="${o.emisor}"/>`,
+    `  <cfdi:Receptor Rfc="${o.receptorRfc}" Nombre="${o.receptor}" UsoCFDI="G03"/>`,
+    "  <cfdi:Conceptos>",
+    `    <cfdi:Concepto Descripcion="${o.concepto}" Cantidad="1" ValorUnitario="${subtotal}"/>`,
+    "  </cfdi:Conceptos>",
+    "  <cfdi:Complemento>",
+    `    <tfd:TimbreFiscalDigital Version="1.1" UUID="${o.uuid}"/>`,
+    "  </cfdi:Complemento>",
+    "</cfdi:Comprobante>",
+  ].join("\n");
+  return "data:text/xml;base64," + utf8ToBase64(xml);
+}
+
+// PDF mínimo de una página con texto (solo ASCII), con tabla xref válida.
+function fakePdfDataUrl(lineas: string[]) {
+  const esc = (t: string) => t.replace(/[()\\]/g, "\\$&");
+  const texto = lineas
+    .map((l, i) => `BT /F1 12 Tf 60 ${740 - i * 20} Td (${esc(l)}) Tj ET`)
+    .join("\n");
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${texto.length} >>\nstream\n${texto}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objs.forEach((o, i) => {
+    offsets.push(pdf.length);
+    pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  offsets.forEach((off) => {
+    pdf += `${String(off).padStart(10, "0")} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return "data:application/pdf;base64," + btoa(pdf);
+}
+
+type EscenarioValidacion = {
+  id: string;
+  correo: string;
+  empresa: string;
+  estado: string;
+  destino: string;
+  tipo: string;
+  motivo: string;
+  creada: string; // ISO
+  inicio: string;
+  fin: string;
+  hotel: { id: number; nombre: string; tarifa: number; emisorRfc: string };
+  foraneo: { tipo: string; monto: number; emisor: string; emisorRfc: string };
+  local: { tipo: string; monto: number; emisor: string };
+  otros: { concepto: string; monto: number };
+  validacion: "ninguna" | "completa" | "parcial";
+};
+
+const ESCENARIOS_VALIDACION: EscenarioValidacion[] = [
+  {
+    id: "s19", correo: "usuario@cklass.com", empresa: "WATA GROUP", estado: "Guanajuato",
+    destino: "GDL - Guanajuato", tipo: "Visita a tiendas",
+    motivo: "Supervisión de tiendas del Bajío", creada: "2026-09-24",
+    inicio: "2026-09-28", fin: "2026-09-30",
+    hotel: { id: 14, nombre: "Fiesta Inn León", tarifa: 790, emisorRfc: "FIL010101AB1" },
+    foraneo: { tipo: "Autobús", monto: 600, emisor: "Autobuses del Bajío", emisorRfc: "ABA010101CD2" },
+    local: { tipo: "Uber", monto: 300, emisor: "Uber México" },
+    otros: { concepto: "Papelería", monto: 200 },
+    validacion: "ninguna",
+  },
+  {
+    id: "s20", correo: "usuario2@cklass.com", empresa: "INTERMEDIARIA INTERMEX", estado: "Nuevo León",
+    destino: "GDL - Monterrey", tipo: "Comercial",
+    motivo: "Reunión de cierre con clientes de la zona norte", creada: "2026-10-02",
+    inicio: "2026-10-05", fin: "2026-10-07",
+    hotel: { id: 15, nombre: "Fiesta Inn Monterrey", tarifa: 950, emisorRfc: "FIM010101EF3" },
+    foraneo: { tipo: "Avión", monto: 1600, emisor: "Aerolínea Nacional", emisorRfc: "ANA010101GH4" },
+    local: { tipo: "Uber", monto: 450, emisor: "Uber México" },
+    otros: { concepto: "Material de capacitación", monto: 250 },
+    validacion: "completa",
+  },
+  {
+    id: "s21", correo: "usuario3@cklass.com", empresa: "TRANSPORTES DE PERSONAL Y MERCANCIA", estado: "Zacatecas",
+    destino: "GDL - Zacatecas", tipo: "Visita a proveedores",
+    motivo: "Auditoría de flotilla en patio Zacatecas", creada: "2026-10-08",
+    inicio: "2026-10-12", fin: "2026-10-14",
+    hotel: { id: 26, nombre: "Emporio Zacatecas", tarifa: 890, emisorRfc: "EZA010101IJ5" },
+    foraneo: { tipo: "Autobús", monto: 1100, emisor: "Autobuses Zacatecanos", emisorRfc: "AZA010101KL6" },
+    local: { tipo: "Uber", monto: 380, emisor: "Uber México" },
+    otros: { concepto: "Imprevistos", monto: 150 },
+    validacion: "parcial",
+  },
+];
+
+const dmy = (iso: string) => iso.split("-").reverse().join("/");
+
+function daysBetweenIso(a: string, b: string) {
+  return Math.max(0, Math.floor((new Date(b).getTime() - new Date(a).getTime()) / 86400000) + 1);
+}
+
+// Tres folios de ejemplo ya comprobados al 100% con sus facturas (XML/PDF), para
+// probar el flujo de Compras Corporativas: uno por validar, uno ya validado por
+// completo y uno a medias con una observación. Idempotente (por id) y con folio
+// asignado al siguiente libre al insertarse, para no chocar con folios reales.
+function backfillEscenariosValidacion() {
+  const users = lsGet<User[]>(KEYS.users, []);
+  const porCorreo = (c: string) => users.find((u) => u.correo === c);
+  const compras = porCorreo("compras@cklass.com");
+  const finanzas = porCorreo("finanzas@cklass.com");
+
+  const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
+  const pendientes = ESCENARIOS_VALIDACION.filter((e) => !solicitudes.some((x) => x.id === e.id));
+  if (!pendientes.length) return;
+
+  const destinos = lsGet<unknown[]>(KEYS.destinos, []);
+  const comprobantes = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  const facturas = lsGet<Record<string, unknown>[]>(KEYS.facturasXml, []);
+  const autorizaciones = lsGet<Autorizacion[]>(KEYS.autorizaciones, []);
+  const nuevasSol: Solicitud[] = [];
+  const nuevasDest: unknown[] = [];
+  const nuevosCg: ComprobanteGasto[] = [];
+  const nuevasFact: Record<string, unknown>[] = [];
+  const nuevasAut: Autorizacion[] = [];
+
+  for (const e of pendientes) {
+    const viajero = porCorreo(e.correo);
+    if (!viajero) continue;
+    const sociedad = SEED_SOCIEDADES.find((so) => so.nombre === e.empresa);
+
+    const folios = [...solicitudes, ...nuevasSol]
+      .map((x) => parseInt(x.folio.replace("#", ""), 10))
+      .filter((n) => !isNaN(n));
+    const folio = "#" + String(Math.max(40, ...folios) + 1).padStart(4, "0");
+
+    const dias = daysBetweenIso(e.inicio, e.fin);
+    const noches = Math.max(0, dias - 1);
+    const hotelMonto = noches * e.hotel.tarifa;
+    const comida = dias * SEED_CONFIG.monto_comida_diario;
+    const total = hotelMonto + e.foraneo.monto + e.local.monto + comida + e.otros.monto;
+    const requiereFinanzas = total > SEED_CONFIG.umbral_finanzas;
+
+    nuevasSol.push({
+      id: e.id, folio, user_id: viajero.id, fecha: dmy(e.creada), empresa: e.empresa,
+      origen: "Guadalajara", destino_resumen: e.destino, tipo_viaje: e.tipo, motivo: e.motivo,
+      personas_count: 1, personas_nombres: viajero.nombre, monto_total: total,
+      jefe_status: "Autorizado", finanzas_status: requiereFinanzas ? "Autorizado" : "N/A",
+      estatus: "Cerrado", comprobante_viaje: dmy(e.fin), created_at: e.creada,
+    });
+
+    nuevasDest.push({
+      id: `dd_${e.id}`, solicitud_id: e.id, estado: e.estado,
+      fecha_inicio: e.inicio, fecha_fin: e.fin,
+      hoteles: [{ id: `hh_${e.id}`, fecha_inicio: e.inicio, fecha_fin: e.fin, monto: e.hotel.tarifa, manual: false, hotel_id: e.hotel.id }],
+      foraneo: [{ id: `rf_${e.id}`, tipo: e.foraneo.tipo, monto: e.foraneo.monto }],
+      local: [{ id: `rl_${e.id}`, tipo: e.local.tipo, monto: e.local.monto }],
+      otros: [{ id: `ro_${e.id}`, concepto: e.otros.concepto, monto: e.otros.monto }],
+    });
+
+    if (viajero.jefe_id) {
+      nuevasAut.push({ id: `av_${e.id}_j`, solicitud_id: e.id, rol_autorizador: "jefe_inmediato", user_id: viajero.jefe_id, status: "autorizado", fecha: e.creada, nota: "" });
+    }
+    if (requiereFinanzas && finanzas) {
+      nuevasAut.push({ id: `av_${e.id}_f`, solicitud_id: e.id, rol_autorizador: "finanzas", user_id: finanzas.id, status: "autorizado", fecha: e.creada, nota: "" });
+    }
+
+    // Renglones (todos comprobados al 100%) + una factura por renglón
+    const renglones: { concepto: string; monto: number; tipo: "XML" | "PDF"; emisor: string; emisorRfc: string }[] = [
+      { concepto: "Hotel", monto: hotelMonto, tipo: "XML", emisor: e.hotel.nombre, emisorRfc: e.hotel.emisorRfc },
+      { concepto: e.foraneo.tipo, monto: e.foraneo.monto, tipo: "XML", emisor: e.foraneo.emisor, emisorRfc: e.foraneo.emisorRfc },
+      { concepto: e.local.tipo, monto: e.local.monto, tipo: "PDF", emisor: e.local.emisor, emisorRfc: "" },
+      { concepto: "Comida", monto: comida, tipo: "XML", emisor: "Restaurantes del Centro", emisorRfc: "RCE010101MN7" },
+      { concepto: "Otros", monto: e.otros.monto, tipo: "PDF", emisor: e.otros.concepto, emisorRfc: "" },
+    ];
+    renglones.forEach((r, i) => {
+      const cgId = `cgv_${e.id}_${i + 1}`;
+      const validar = e.validacion === "completa" || (e.validacion === "parcial" && i <= 2);
+      const cg: ComprobanteGasto = {
+        id: cgId, solicitud_id: e.id, concepto: r.concepto,
+        monto_solicitado: r.monto, monto_comprobado: r.monto, status_renglon: "comprobado",
+      };
+      if (validar && compras) {
+        cg.validado = true;
+        cg.validado_por = compras.id;
+        cg.validado_fecha = "2026-10-20";
+      }
+      if (e.validacion === "parcial" && r.concepto === "Comida") {
+        cg.nota_validacion =
+          "El RFC del receptor de esta factura no coincide con la sociedad; solicitar factura corregida.";
+      }
+      nuevosCg.push(cg);
+
+      const uuid = `${e.id}${i + 1}A7C1-4B2E-4F1A-9D3C-${String(100000 + i * 37)}ABCDEF`
+        .toUpperCase()
+        .slice(0, 36);
+      const archivo =
+        r.tipo === "XML"
+          ? `${e.id}_${r.concepto.toLowerCase()}_factura.xml`
+          : `${e.id}_${r.concepto.toLowerCase()}_comprobante.pdf`;
+      const ascii = (t: string) => t.replace(/[^\x20-\x7E]/g, "");
+      const contenido =
+        r.tipo === "XML"
+          ? fakeXmlDataUrl({
+              emisor: r.emisor, emisorRfc: r.emisorRfc,
+              receptor: e.empresa, receptorRfc: sociedad?.rfc ?? "XAXX010101000",
+              total: r.monto, uuid, fecha: e.fin, concepto: r.concepto,
+            })
+          : fakePdfDataUrl([
+              ascii(`Comprobante de ${r.concepto}`),
+              ascii(`Emisor: ${r.emisor}`),
+              `Folio: ${folio}  Importe: $${r.monto}.00 MXN`,
+              `Fecha: ${dmy(e.fin)}`,
+            ]);
+      nuevasFact.push({
+        id: `fv_${e.id}_${i + 1}`, solicitud_id: e.id, tipo: r.tipo, fecha: dmy(e.fin),
+        uuid, archivo, total: r.monto, status: "Verificado",
+        concepto_id: cgId, monto_aplicado: r.monto, contenido,
+      });
+    });
+  }
+
+  if (!nuevasSol.length) return;
+  lsSet(KEYS.solicitudes, [...nuevasSol, ...solicitudes]);
+  lsSet(KEYS.destinos, [...destinos, ...nuevasDest]);
+  lsSet(KEYS.comprobantesGasto, [...comprobantes, ...nuevosCg]);
+  lsSet(KEYS.facturasXml, [...nuevasFact, ...facturas]);
+  lsSet(KEYS.autorizaciones, [...autorizaciones, ...nuevasAut]);
 }

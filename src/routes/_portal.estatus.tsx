@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Eye,
   ReceiptText,
+  CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
@@ -22,6 +23,7 @@ import {
   filterSolicitudesByDateCutoff,
   filterSolicitudesByOwnership,
   avanceComprobacion,
+  avanceValidacion,
   estatusVisible,
   ESTATUS_VISIBLES,
   type Solicitud,
@@ -118,6 +120,29 @@ function Estatus() {
   // Etiqueta que ve el usuario (Pendiente/Autorizado/Comprobado/Rechazado); el
   // valor guardado en s.estatus sigue siendo Abierto/Cerrado/Rechazado.
   const etiquetaEstatus = (s: Solicitud) => estatusVisible(s.estatus, estaComprobado(s.id));
+  // Marca de "Validado por Compras" (todos los conceptos validados) junto al estatus.
+  const estaValidado = (solicitudId: string) =>
+    avanceValidacion(comprobantesGasto, solicitudId).completa;
+  const marcaValidado = (s: Solicitud) =>
+    s.estatus === "Cerrado" && estaValidado(s.id) ? (
+      <span
+        className="ml-1 inline-flex align-middle"
+        style={{ color: "#2D6A4F" }}
+        title="Validado por Compras Corporativas"
+      >
+        <CheckCircle2 size={15} />
+      </span>
+    ) : null;
+  // Compras Corporativas entra directo a validar los folios ya comprobados por completo;
+  // el resto de los casos abre el detalle de siempre.
+  const esValidador = hasPerm("validar_comprobacion") && !hasPerm("comprobar");
+  const abrirFolio = (s: Solicitud) => {
+    if (esValidador && s.estatus === "Cerrado" && estaComprobado(s.id)) {
+      nav({ to: "/comprobacion", search: { solicitudId: s.id } });
+      return;
+    }
+    setDetail(s);
+  };
 
   // Alcance por rol: el usuario solo ve sus folios, el jefe inmediato solo los de
   // quienes lo tienen como jefe, y los roles con "ver todo" ven todos. Además se
@@ -333,12 +358,15 @@ function Estatus() {
                 <div className="flex items-stretch">
                   <button
                     type="button"
-                    onClick={() => setDetail(s)}
+                    onClick={() => abrirFolio(s)}
                     className="min-w-0 flex-1 p-3 text-left active:bg-secondary/60"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-xs font-semibold">{s.folio}</span>
-                      <StatusBadge estatus={s.estatus} comprobado={estaComprobado(s.id)} />
+                      <span className="inline-flex items-center">
+                        <StatusBadge estatus={s.estatus} comprobado={estaComprobado(s.id)} />
+                        {marcaValidado(s)}
+                      </span>
                     </div>
                     <div className="mt-1 flex items-baseline justify-between gap-2">
                       <span className="truncate text-sm font-medium">{userName(s.user_id)}</span>
@@ -366,7 +394,7 @@ function Estatus() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDetail(s)}
+                    onClick={() => abrirFolio(s)}
                     aria-label={`Ver detalle del folio ${s.folio}`}
                     className="flex w-12 shrink-0 flex-col items-center justify-center gap-0.5 border-l text-[10px] font-semibold active:bg-secondary/60"
                     style={{ color: "var(--color-primary)" }}
@@ -405,7 +433,7 @@ function Estatus() {
                 const bad = s.estatus === "Rechazado";
                 const stripe = bad ? "#E30613" : ok ? "#2D6A4F" : "#CCC";
                 return (
-                  <tr key={s.id} className="cursor-pointer border-t hover:bg-secondary/50" style={{ borderLeft: `3px solid ${stripe}` }} onDoubleClick={() => setDetail(s)}>
+                  <tr key={s.id} className="cursor-pointer border-t hover:bg-secondary/50" style={{ borderLeft: `3px solid ${stripe}` }} onDoubleClick={() => abrirFolio(s)}>
                     <td className="p-3 font-mono text-xs">{s.folio}</td>
                     <td className="p-3 text-xs">{s.fecha}</td>
                     <td className="p-3">{userName(s.user_id)}</td>
@@ -419,7 +447,7 @@ function Estatus() {
                         : <span className="ckl-badge" style={{ background: "#FEE2E2", color: "#DC2626" }}>Sin cargar</span>}
                     </td>
                     <td className="p-3">{s.nota_rechazo && <MessageSquareWarning size={16} className="text-[color:var(--color-primary)]" />}</td>
-                    <td className="p-3"><StatusBadge estatus={s.estatus} comprobado={estaComprobado(s.id)} /></td>
+                    <td className="p-3 whitespace-nowrap"><StatusBadge estatus={s.estatus} comprobado={estaComprobado(s.id)} />{marcaValidado(s)}</td>
                   </tr>
                 );
               })}
@@ -430,8 +458,16 @@ function Estatus() {
           </table>
         </div>
         <div className="border-t bg-secondary p-2 text-[11px] text-muted-foreground">
-          <span className="hidden md:inline">Doble clic en una fila para ver detalle.</span>
-          <span className="md:hidden">Toca un folio (o el ojo) para ver el detalle.</span>
+          <span className="hidden md:inline">
+            {esValidador
+              ? "Doble clic en un folio Comprobado para validar sus facturas; en el resto, para ver el detalle."
+              : "Doble clic en una fila para ver detalle."}
+          </span>
+          <span className="md:hidden">
+            {esValidador
+              ? "Toca un folio Comprobado (o el ojo) para validarlo; en el resto, para ver el detalle."
+              : "Toca un folio (o el ojo) para ver el detalle."}
+          </span>
         </div>
       </div>
 

@@ -54,6 +54,8 @@ export function PortalLayout() {
     // El rol Administrador no solicita ni comprueba sus propios viáticos.
     if (role.nombre === "administrador" && (i.to === "/solicitar" || i.to === "/comprobacion")) return false;
     if (i.to === "/usuarios") return role.permisos.gestionar_usuarios;
+    // Compras Corporativas entra a Comprobación solo para validar (no para comprobar).
+    if (i.to === "/comprobacion") return role.permisos.comprobar || role.permisos.validar_comprobacion;
     if (!i.perm) return true;
     return role.permisos[i.perm];
   });

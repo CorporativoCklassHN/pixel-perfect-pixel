@@ -60,7 +60,7 @@ Seis roles base (más los que el admin cree en Configuración; `Role.nombre` es 
 | `jefe_inmediato` | Autoriza paso “jefe” (`autorizar_lte5000`), ve a su equipo (`jefe_id`), rechaza, ve reportes |
 | `gestor_vuelos` | `ver_todo`; en Comprobación **solo ve/comprueba el concepto “Avión”**; sube comprobantes de viaje |
 | `finanzas` | Autoriza montos > umbral (`autorizar_gt5000`), `ver_todo`, reportes y exportación |
-| `compras_corporativas` | Mismos permisos que finanzas |
+| `compras_corporativas` | Mismos permisos que finanzas **+ `validar_comprobacion`**: revisa y valida las facturas de folios ya comprobados (ver “Validación de Compras”) |
 | `administrador` | Todo; **no solicita ni comprueba** sus propios viáticos (oculto en menú); puede revertir autorizaciones |
 
 Reglas de UI ya decididas:
@@ -121,6 +121,8 @@ Sociedades: WATA GROUP, INTERMEDIARIA INTERMEX, TRANSPORTES DE PERSONAL Y MERCAN
 - Eliminar una factura revierte exactamente `monto_aplicado`.
 - “Comprobado” = total comprobado === total solicitado (>0). Mismo criterio en Comprobación, Estatus y Dashboard.
 - **Comprobación atrasada**: solicitud `Cerrado`, no comprobada por completo y con más de `dias_comprobacion_atrasada` (default 7) días desde `created_at`. El Dashboard cuenta con el alcance del rol del usuario y enlaza a Estatus con filtro `?atrasados`; la lista debe coincidir con el número (ya hubo un bug por eso).
+- **Validación de Compras Corporativas** (permiso `validar_comprobacion`, rol sin `comprobar`): Compras revisa que las facturas de cada concepto sean reales. En Comprobación la tabla de conceptos tiene las columnas **Validado** (casilla) y **Nota** (observación opcional, se guarda al salir del campo o con Enter) entre Estatus y Adjuntar. Datos en `ComprobanteGasto`: `validado`, `validado_por`, `validado_fecha`, `nota_validacion` (opcionales). Reglas: solo se puede validar un renglón ya comprobado y con monto > 0; quitar una factura que deja el renglón incompleto reinicia su validación; Compras **no** sube ni elimina facturas, no ve Adjuntar ni No deducibles/Depósito sobrante, y su lista de folios solo trae los **comprobados al 100%** (con dueño visible). En Estatus, doble clic (o toque/ojo en móvil) en un folio Comprobado lo lleva directo a validar; los folios con todos sus conceptos validados muestran ✓ junto al estatus y la insignia “Validado por Compras”. El dueño del folio ve el ✓ y la Nota en solo lectura. `avanceValidacion()` en `store.ts`. Roles guardados antes de este permiso lo reciben por `backfillValidarComprobacion`: aplica a `compras_corporativas` **y a cualquier rol cuyo nombre empiece con “compras”** (p. ej. `compras_corp` creado a mano en Configuración) que aún no tenga la clave; si el admin ya la definió (true/false) no se sobrescribe. Para cualquier otro rol se activa en Permisos → “Validar comprobaciones”.
+- **Escenarios de ejemplo de validación** (`backfillEscenariosValidacion`, ids `s19`–`s21`, folio = siguiente libre al insertarse, con facturas XML/PDF reales en base64): María Torres #por validar, Carlos Mendoza (>$5,000, pasó por Finanzas) ya validado al 100%, Sofía Ramírez parcial con una Nota de observación.
 - Secciones adicionales: No deducibles y Depósito sobrante (reintegro con comprobante bancario obligatorio). El gestor de vuelos no las ve.
 
 ### Configuración (admin)

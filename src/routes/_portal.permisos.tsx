@@ -13,6 +13,7 @@ const MODULOS: { key: string; label: string }[] = [
   { key: "solicitar", label: "Solicitar viáticos" },
   { key: "ver_propio", label: "Ver propios" },
   { key: "comprobar", label: "Comprobar" },
+  { key: "validar_comprobacion", label: "Validar comprobaciones" },
   { key: "ver_equipo", label: "Ver equipo" },
   { key: "ver_todo", label: "Ver todo" },
   { key: "autorizar_lte5000", label: "Autorizar ≤ umbral" },
