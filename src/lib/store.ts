@@ -1009,8 +1009,9 @@ export function filterSolicitudesByDateCutoff(solicitudes: Solicitud[], roleName
   return solicitudes.filter((s) => new Date(s.created_at) >= cutoff);
 }
 
-// Alcance por rol: ver_todo ve todo, ver_equipo ve solo a su equipo (jefe_id === user.id),
-// cualquier otro rol ve únicamente sus propias solicitudes.
+// Alcance por rol: ver_todo ve todo, ver_equipo ve a su equipo (jefe_id === user.id) más
+// sus propias solicitudes, cualquier otro rol ve únicamente las propias. Se usa igual en
+// Dashboard, Estatus, Reportes y el contador del menú para que los números coincidan.
 export function filterSolicitudesByOwnership(
   user: User | null,
   role: Role | null,
@@ -1021,7 +1022,7 @@ export function filterSolicitudesByOwnership(
   if (role.permisos.ver_todo) return solicitudes;
   if (role.permisos.ver_equipo) {
     const teamIds = new Set(users.filter((u) => u.jefe_id === user.id).map((u) => u.id));
-    return solicitudes.filter((s) => teamIds.has(s.user_id));
+    return solicitudes.filter((s) => teamIds.has(s.user_id) || s.user_id === user.id);
   }
   return solicitudes.filter((s) => s.user_id === user.id);
 }

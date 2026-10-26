@@ -106,6 +106,7 @@ function Estatus() {
 
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("Todos");
+  const [usuarioFiltro, setUsuarioFiltro] = useState("Todos");
   const [detail, setDetail] = useState<Solicitud | null>(null);
   const [rejecting, setRejecting] = useState<Solicitud | null>(null);
   const [rejectNote, setRejectNote] = useState("");
@@ -118,37 +119,49 @@ function Estatus() {
   // valor guardado en s.estatus sigue siendo Abierto/Cerrado/Rechazado.
   const etiquetaEstatus = (s: Solicitud) => estatusVisible(s.estatus, estaComprobado(s.id));
 
+  // Alcance por rol: el usuario solo ve sus folios, el jefe inmediato solo los de
+  // quienes lo tienen como jefe, y los roles con "ver todo" ven todos. Además se
+  // aplica la ventana de fechas del rol. Más recientes primero (empate: folio mayor).
+  const visibles = useMemo(
+    () =>
+      filterSolicitudesByDateCutoff(
+        filterSolicitudesByOwnership(user, role, solicitudes, users),
+        role?.nombre,
+      ).sort(
+        (a, b) =>
+          b.created_at.localeCompare(a.created_at) ||
+          b.folio.localeCompare(a.folio, undefined, { numeric: true }),
+      ),
+    [user, role, solicitudes, users],
+  );
+  // Opciones del filtro por Usuario: solo quienes tienen folios dentro del alcance.
+  const usuariosOpciones = useMemo(() => {
+    const ids = new Set(visibles.map((s) => s.user_id));
+    return users.filter((u) => ids.has(u.id)).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [visibles, users]);
+
   const filtered = useMemo(() => {
     const comprobado = (id: string) => avanceComprobacion(comprobantesGasto, id).completo;
-    const dentroDeRango = filterSolicitudesByDateCutoff(solicitudes, role?.nombre);
-    // El atajo "Ver comprobaciones atrasadas" del Dashboard cuenta solo lo que
-    // ese usuario puede ver ahí (propias/equipo/todas, según su rol) — aquí se
-    // aplica el mismo alcance para que la lista coincida con ese número,
-    // aunque Estatus normalmente no filtre por dueño.
-    const propiasIds = soloAtrasados
-      ? new Set(filterSolicitudesByOwnership(user, role, solicitudes, users).map((s) => s.id))
-      : null;
-    return dentroDeRango.filter((s) => {
+    return visibles.filter((s) => {
       const u = users.find((x) => x.id === s.user_id);
       const matchQ = !q || s.folio.toLowerCase().includes(q.toLowerCase()) || (u?.nombre.toLowerCase().includes(q.toLowerCase()) ?? false);
       const matchE =
         estado === "Todos" || estatusVisible(s.estatus, comprobado(s.id)) === estado;
       const diasTranscurridos = (Date.now() - new Date(s.created_at).getTime()) / 86400000;
+      const matchU = usuarioFiltro === "Todos" || s.user_id === usuarioFiltro;
       const matchAtrasados =
         !soloAtrasados ||
-        (propiasIds!.has(s.id) &&
-          s.estatus === "Cerrado" &&
+        (s.estatus === "Cerrado" &&
           !comprobado(s.id) &&
           diasTranscurridos > diasComprobacionAtrasada);
-      return matchQ && matchE && matchAtrasados;
+      return matchQ && matchE && matchU && matchAtrasados;
     });
   }, [
-    solicitudes,
+    visibles,
     q,
     estado,
+    usuarioFiltro,
     users,
-    role,
-    user,
     soloAtrasados,
     comprobantesGasto,
     diasComprobacionAtrasada,
@@ -172,6 +185,8 @@ function Estatus() {
   const canAuth = (s: Solicitud) => {
     if (!role) return false;
     if (s.estatus !== "Abierto") return false;
+    // Nadie autoriza ni rechaza su propia solicitud (p. ej. un jefe que ve sus folios).
+    if (s.user_id === user?.id) return false;
     // El paso de Jefe siempre lo puede dar quien tenga el permiso, sin importar el
     // monto: el umbral solo decide si además se necesita un segundo visto bueno de
     // Finanzas, no si el propio Jefe puede autorizar. Antes exigir monto ≤ umbral
@@ -280,6 +295,23 @@ function Estatus() {
             <input className="ckl-input pl-8" placeholder="Folio o usuario..." value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
         </div>
+        {usuariosOpciones.length > 1 && (
+          <div>
+            <label className="ckl-label">Usuario</label>
+            <select
+              className="ckl-input"
+              value={usuarioFiltro}
+              onChange={(e) => setUsuarioFiltro(e.target.value)}
+            >
+              <option value="Todos">Todos</option>
+              {usuariosOpciones.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="ckl-label">Estatus</label>
           <select className="ckl-input" value={estado} onChange={(e) => setEstado(e.target.value)}>

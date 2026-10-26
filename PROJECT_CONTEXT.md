@@ -65,8 +65,9 @@ Seis roles base (más los que el admin cree en Configuración; `Role.nombre` es 
 
 Reglas de UI ya decididas:
 - **Usuarios** solo visible con `gestionar_usuarios` (admin). Permisos → `configurar_permisos`; Configuración → `configurar_montos`.
-- Alcance de datos (`filterSolicitudesByOwnership`): `ver_todo` ve todo; `ver_equipo` ve solo usuarios con `jefe_id === user.id`; el resto, solo lo propio.
+- Alcance de datos (`filterSolicitudesByOwnership`): `ver_todo` ve todo; `ver_equipo` ve a los usuarios con `jefe_id === user.id` **más sus propios folios**; el resto, solo lo propio.
 - Ventana de visibilidad (`filterSolicitudesByDateCutoff`): admin/finanzas/compras/jefe ven **4 meses** atrás; los demás **2 meses**.
+- **Estatus aplica ese alcance** (y el contador del menú lateral también): el `usuario` ve solo sus folios; el `jefe_inmediato` ve los de quienes lo tienen como jefe **y los suyos** (los suyos los autoriza su propio jefe, no él); `ver_todo` (admin, finanzas, compras, gestor) ve todo. Orden: más reciente primero (`created_at` desc, empate por folio desc). Filtros: Buscar, **Usuario** (solo aparece si el alcance incluye a más de una persona; lista a quienes tienen folios visibles) y Estatus.
 - **Sesión única por usuario**: iniciar sesión en otra pestaña/dispositivo cierra la anterior (token en `ckl_session`).
 - **Recarga (F5) / URL directa**: la sesión se lee en un `useEffect` (no en el inicializador de `useState`: leerla síncronamente rompe la hidratación SSR). `AuthProvider` expone `cargando` (true hasta leerla) y `PortalLayout` no redirige a `/login` mientras `cargando`. No cambies esto a inicialización lazy.
 
@@ -104,6 +105,7 @@ Sociedades: WATA GROUP, INTERMEDIARIA INTERMEX, TRANSPORTES DE PERSONAL Y MERCAN
 
 ### Autorización (Estatus)
 - Flujo: solicitud nace `Abierto` con `jefe_status: Pendiente`. Si `monto_total > umbral_finanzas` (default **$5,000**) → `finanzas_status: Pendiente`, si no `N/A`.
+- **Nadie autoriza ni rechaza su propia solicitud** (`canAuth` excluye `s.user_id === user.id`): el jefe ve sus folios pero los autoriza su propio jefe (admin).
 - Paso **jefe**: lo da quien tenga `autorizar_lte5000` y `jefe_status === Pendiente`, **sin importar el monto** (el umbral solo decide si hace falta además Finanzas; antes de corregirlo había un deadlock).
 - Paso **finanzas**: `autorizar_gt5000`, monto > umbral, jefe ya autorizó, finanzas pendiente.
 - La solicitud pasa a `Cerrado` cuando queda autorizada por todos los pasos requeridos. “Cerrado” significa **autorizada y lista para comprobar** (no “terminada”).

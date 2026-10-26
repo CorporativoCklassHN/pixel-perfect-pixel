@@ -5,7 +5,15 @@ import {
   Users, ShieldCheck, Settings, Menu, Bell, Plus, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { KEYS, lsGet, bloqueoNuevaSolicitud, type Solicitud } from "@/lib/store";
+import {
+  KEYS,
+  lsGet,
+  bloqueoNuevaSolicitud,
+  filterSolicitudesByDateCutoff,
+  filterSolicitudesByOwnership,
+  type Solicitud,
+  type User,
+} from "@/lib/store";
 import { showErrorDialog } from "@/components/ErrorDialog";
 import { UserMenu } from "@/components/portal/UserMenu";
 import cklassLogo from "@/cklass-logo.png";
@@ -25,7 +33,11 @@ export function PortalLayout() {
   if (cargando || !user || !role) return null;
 
   const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
-  const abiertos = solicitudes.filter((s) => s.estatus === "Abierto").length;
+  // El contador de Estatus cuenta solo lo que este usuario puede ver en esa pantalla.
+  const abiertos = filterSolicitudesByDateCutoff(
+    filterSolicitudesByOwnership(user, role, solicitudes, lsGet<User[]>(KEYS.users, [])),
+    role.nombre,
+  ).filter((s) => s.estatus === "Abierto").length;
 
   const items: Item[] = [
     { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, section: "General" },
