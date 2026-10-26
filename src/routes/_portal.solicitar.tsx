@@ -9,7 +9,7 @@ import { showErrorDialog } from "@/components/ErrorDialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  KEYS, lsGet, lsSet, fmtMoney, nextFolio, uid, bloqueoNuevaSolicitud,
+  KEYS, lsGet, lsSet, fmtMoney, nextFolio, uid, bloqueoNuevaSolicitud, crearRevisionesMontoManual,
   type Hotel, type Solicitud, type ComprobanteGasto, type Autorizacion,
 } from "@/lib/store";
 
@@ -395,6 +395,10 @@ function Solicitar() {
       },
     ];
     lsSet(KEYS.comprobantesGasto, [...cg, ...newCg]);
+
+    // Hoteles con "Monto manual" distinto al predeterminado: Compras recibe alerta en la
+    // campanita y un correo informativo, y decide aceptar o rechazar (con comentario).
+    if (user) crearRevisionesMontoManual({ id: solId, folio: folioFinal }, destinos, user);
 
     setFolio(folioFinal);
     toast.success(

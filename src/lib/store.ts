@@ -137,6 +137,9 @@ export const KEYS = {
   origenes: "ckl_origenes",
   resetCodes: "ckl_reset_codes",
   session: "ckl_session",
+  revisionesMonto: "ckl_revisiones_monto",
+  correos: "ckl_correos",
+  logs: "ckl_logs",
 } as const;
 
 // ───────── SEED DATA ─────────
@@ -204,6 +207,8 @@ const SEED_ROLES: Role[] = [
     permisos: {
       // Revisa que las facturas de los folios ya comprobados sean reales (Comprobación → Validado/Nota).
       validar_comprobacion: true,
+      // Acepta o rechaza los montos manuales de hotel (campanita + correo informativo).
+      revisar_monto_manual: true,
       solicitar: true, ver_propio: true, comprobar: false,
       ver_equipo: false, ver_todo: true,
       autorizar_lte5000: false, autorizar_gt5000: true,
@@ -353,7 +358,7 @@ const SEED_DESTINOS_DETALLE = [
     // ("Monto de hotel no corresponde a tarifa acordada").
     id: "dd_s3", solicitud_id: "s3", estado: "Colima",
     fecha_inicio: "2026-05-05", fecha_fin: "2026-05-07",
-    hoteles: [{ id: "hh_s3", fecha_inicio: "2026-05-05", fecha_fin: "2026-05-07", monto: 1200, manual: true }],
+    hoteles: [{ id: "hh_s3", fecha_inicio: "2026-05-05", fecha_fin: "2026-05-07", monto: 600, manual: true }],
     foraneo: [{ id: "rf_s3", tipo: "Autobús", monto: 500 }],
     local: [{ id: "rl_s3", tipo: "Uber", monto: 200 }],
     otros: [{ id: "ro_s3", concepto: "Imprevistos", monto: 100 }],
@@ -409,7 +414,7 @@ const SEED_DESTINOS_DETALLE = [
   {
     id: "dd_s10", solicitud_id: "s10", estado: "Querétaro",
     fecha_inicio: "2026-09-04", fecha_fin: "2026-09-06",
-    hoteles: [{ id: "hh_s10", fecha_inicio: "2026-09-04", fecha_fin: "2026-09-06", monto: 1600, manual: true }],
+    hoteles: [{ id: "hh_s10", fecha_inicio: "2026-09-04", fecha_fin: "2026-09-06", monto: 800, manual: true }],
     foraneo: [{ id: "rf_s10", tipo: "Autobús", monto: 1400 }],
     local: [{ id: "rl_s10", tipo: "Uber", monto: 300 }],
     otros: [{ id: "ro_s10", concepto: "Material de capacitación", monto: 300 }],
@@ -607,6 +612,9 @@ export function initSeed() {
     [KEYS.notas, []],
     [KEYS.comprobantesViaje, []],
     [KEYS.facturasXml, []],
+    [KEYS.revisionesMonto, []],
+    [KEYS.correos, []],
+    [KEYS.logs, []],
   ];
   for (const [k, v] of seed) {
     if (window.localStorage.getItem(k) === null) {
@@ -620,7 +628,9 @@ export function initSeed() {
   backfillEmpleadosMultiSociedad();
   backfillEscenariosComprobacion();
   backfillValidarComprobacion();
+  backfillRevisarMontoManual();
   backfillEscenariosValidacion();
+  backfillEscenariosMontoManual();
   backfillFolioCollisions();
   backfillGestorVuelosComprobar();
   backfillDesgloseTransportePorTipo();
@@ -1436,4 +1446,470 @@ function backfillEscenariosValidacion() {
   lsSet(KEYS.comprobantesGasto, [...comprobantes, ...nuevosCg]);
   lsSet(KEYS.facturasXml, [...nuevasFact, ...facturas]);
   lsSet(KEYS.autorizaciones, [...autorizaciones, ...nuevasAut]);
+}
+
+// ───────── Montos manuales de hotel: revisión de Compras ─────────
+// Cuando una solicitud se guarda con un hotel cuyo "Monto manual por noche" es
+// distinto al predeterminado del catálogo, se abre una revisión para Compras
+// (campanita del portal + correo informativo). Compras la acepta o rechaza con un
+// comentario; la revisión resuelta se oculta de su lista al día siguiente.
+export type RevisionMontoManual = {
+  id: string;
+  solicitud_id: string;
+  folio: string;
+  user_id: string; // quien solicitó
+  destino_estado: string;
+  hotel_stay_id: string;
+  hotel_id: number; // 0 = sin hotel de catálogo
+  hotel_nombre: string;
+  tarifa_default: number; // por noche, del catálogo (0 si no hay hotel de catálogo)
+  monto_manual: number; // por noche, el que capturó el usuario
+  noches: number;
+  fecha_inicio: string;
+  fecha_fin: string;
+  creada_at: string; // ISO con hora
+  estado: "pendiente" | "aceptado" | "rechazado";
+  decidido_por?: string;
+  decidido_at?: string; // ISO con hora
+  comentario?: string;
+};
+
+// Sin servidor de correo todavía: cada correo queda registrado aquí (estado "simulado").
+export type CorreoSimulado = {
+  id: string;
+  fecha: string; // ISO con hora
+  para: string; // correo
+  usuario_id: string;
+  asunto: string;
+  cuerpo: string;
+  referencia: string; // id de la revisión
+  estado: "simulado" | "omitido"; // "omitido": notificaciones por correo desactivadas en Configuración
+};
+
+// Bitácora de eventos. Hoy vive en localStorage; con la base de datos conectada
+// debe persistirse tal cual en una tabla `logs` (id, fecha, tipo, entidad,
+// entidad_id, usuario_id, detalle JSON).
+export type LogEvento = {
+  id: string;
+  fecha: string; // ISO con hora
+  tipo: string;
+  entidad: string;
+  entidad_id: string;
+  usuario_id: string | null;
+  detalle: Record<string, unknown>;
+};
+
+export function registrarLog(
+  tipo: string,
+  entidad: string,
+  entidadId: string,
+  usuarioId: string | null,
+  detalle: Record<string, unknown> = {},
+  cuando: Date = new Date(),
+) {
+  const logs = lsGet<LogEvento[]>(KEYS.logs, []);
+  logs.push({
+    id: uid("log_"),
+    fecha: cuando.toISOString(),
+    tipo,
+    entidad,
+    entidad_id: entidadId,
+    usuario_id: usuarioId,
+    detalle,
+  });
+  lsSet(KEYS.logs, logs);
+}
+
+const dos = (n: number) => String(n).padStart(2, "0");
+// Fecha local (YYYY-MM-DD), no UTC: "al día siguiente" se cuenta por día natural del usuario.
+export function hoyLocal(d: Date = new Date()) {
+  return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`;
+}
+export function fechaLocal(iso: string) {
+  return hoyLocal(new Date(iso));
+}
+
+// Una revisión se muestra mientras esté pendiente y, una vez resuelta, solo durante
+// el día en que se resolvió: al día siguiente desaparece de la lista.
+export function revisionVisible(r: RevisionMontoManual, hoy: string = hoyLocal()) {
+  return r.estado === "pendiente" || (!!r.decidido_at && fechaLocal(r.decidido_at) === hoy);
+}
+
+// Usuarios activos cuyo rol puede revisar montos manuales (Compras Corporativas y Compras Corp).
+export function revisoresMontoManual(excluirUserId?: string): User[] {
+  const roles = lsGet<Role[]>(KEYS.roles, []);
+  const ids = new Set(roles.filter((r) => r.permisos.revisar_monto_manual).map((r) => r.id));
+  return lsGet<User[]>(KEYS.users, []).filter(
+    (u) => u.activo && ids.has(u.rol_id) && u.id !== excluirUserId,
+  );
+}
+
+type DestinoMonto = {
+  estado: string;
+  hoteles: {
+    id: string;
+    fecha_inicio: string;
+    fecha_fin: string;
+    monto: number;
+    manual: boolean;
+    hotel_id?: number;
+  }[];
+};
+
+function nochesEntreIso(a: string, b: string) {
+  if (!a || !b) return 0;
+  const dias = Math.floor((new Date(b).getTime() - new Date(a).getTime()) / 86400000) + 1;
+  return Math.max(0, dias - 1);
+}
+
+function cuerpoCorreoMonto(r: RevisionMontoManual, solicitante: string) {
+  const dif = r.monto_manual - r.tarifa_default;
+  return [
+    `${solicitante} guardó la solicitud ${r.folio} con un hotel a un monto distinto al predeterminado.`,
+    "",
+    `Hotel: ${r.hotel_nombre} (${r.destino_estado})`,
+    `Fechas: ${r.fecha_inicio} al ${r.fecha_fin} (${r.noches} noche(s))`,
+    r.tarifa_default > 0
+      ? `Monto predeterminado por noche: $${r.tarifa_default.toLocaleString("es-MX")}`
+      : "Monto predeterminado: sin hotel de catálogo",
+    `Monto manual por noche: $${r.monto_manual.toLocaleString("es-MX")}`,
+    r.tarifa_default > 0
+      ? `Diferencia por noche: ${dif >= 0 ? "+" : "-"}$${Math.abs(dif).toLocaleString("es-MX")}`
+      : "",
+    "",
+    "Este correo es solo informativo. La revisión (aceptar o rechazar con comentario) se hace en el portal, en la campanita de notificaciones.",
+  ]
+    .filter((l, i, arr) => !(l === "" && arr[i - 1] === ""))
+    .join("\n");
+}
+
+// Se llama al guardar una solicitud (alta o edición). Abre una revisión por cada
+// estancia de hotel con monto manual distinto al del catálogo, avisa por campanita
+// y por correo (informativo, simulado) a Compras y deja todo en la bitácora.
+// Al editar: las revisiones pendientes de la solicitud se regeneran con los montos
+// vigentes; las ya resueltas se conservan (y no se repiten si el monto no cambió).
+export function crearRevisionesMontoManual(
+  sol: Pick<Solicitud, "id" | "folio">,
+  destinos: DestinoMonto[],
+  solicitante: User,
+  ahora: Date = new Date(),
+): RevisionMontoManual[] {
+  const hoteles = lsGet<Hotel[]>(KEYS.hoteles, []);
+  const existentes = lsGet<RevisionMontoManual[]>(KEYS.revisionesMonto, []);
+  const resueltas = existentes.filter((r) => r.solicitud_id === sol.id && r.estado !== "pendiente");
+  const previasPendientes = existentes.filter(
+    (r) => r.solicitud_id === sol.id && r.estado === "pendiente",
+  );
+  const resto = existentes.filter((r) => r.solicitud_id !== sol.id || r.estado !== "pendiente");
+
+  const nuevas: RevisionMontoManual[] = [];
+  // Pendientes que siguen vigentes (mismo hotel y monto): se conservan tal cual, sin avisar de nuevo.
+  const conservadas: RevisionMontoManual[] = [];
+  for (const d of destinos) {
+    for (const h of d.hoteles) {
+      if (!h.manual || !(Number(h.monto) > 0)) continue;
+      const cat = hoteles.find((x) => x.id === h.hotel_id);
+      const tarifa = cat?.tarifa_base ?? 0;
+      // Igual al predeterminado: no hay cambio que revisar.
+      if (cat && Number(h.monto) === tarifa) continue;
+      const hotelId = h.hotel_id ?? 0;
+      const igual = (r: RevisionMontoManual) =>
+        r.hotel_stay_id === h.id && r.hotel_id === hotelId && r.monto_manual === Number(h.monto);
+      const previa = previasPendientes.find(igual);
+      if (previa) {
+        conservadas.push(previa);
+        continue;
+      }
+      if (resueltas.some(igual)) continue;
+      nuevas.push({
+        id: uid("rev_"),
+        solicitud_id: sol.id,
+        folio: sol.folio,
+        user_id: solicitante.id,
+        destino_estado: d.estado,
+        hotel_stay_id: h.id,
+        hotel_id: hotelId,
+        hotel_nombre: cat?.nombre ?? "Hotel fuera de catálogo",
+        tarifa_default: tarifa,
+        monto_manual: Number(h.monto),
+        noches: nochesEntreIso(h.fecha_inicio, h.fecha_fin),
+        fecha_inicio: h.fecha_inicio,
+        fecha_fin: h.fecha_fin,
+        creada_at: ahora.toISOString(),
+        estado: "pendiente",
+      });
+    }
+  }
+
+  // Hubo cambio si se descartaron pendientes anteriores o si hay revisiones nuevas.
+  const cambioPendientes =
+    existentes.length !== resto.length + conservadas.length || nuevas.length > 0;
+  if (cambioPendientes) lsSet(KEYS.revisionesMonto, [...nuevas, ...conservadas, ...resto]);
+  if (!nuevas.length) return [];
+
+  const config = lsGet<{ notif_email_activo?: boolean }>(KEYS.config, {});
+  const correoActivo = config.notif_email_activo !== false;
+  const destinatarios = revisoresMontoManual(solicitante.id);
+  const correos = lsGet<CorreoSimulado[]>(KEYS.correos, []);
+  const nuevosCorreos: CorreoSimulado[] = [];
+
+  for (const r of nuevas) {
+    registrarLog(
+      "monto_manual_detectado",
+      "revision_monto",
+      r.id,
+      solicitante.id,
+      {
+        folio: r.folio,
+        hotel: r.hotel_nombre,
+        tarifa_default: r.tarifa_default,
+        monto_manual: r.monto_manual,
+        noches: r.noches,
+        destinatarios: destinatarios.map((u) => u.correo),
+      },
+      ahora,
+    );
+    for (const u of destinatarios) {
+      nuevosCorreos.push({
+        id: uid("mail_"),
+        fecha: ahora.toISOString(),
+        para: u.correo,
+        usuario_id: u.id,
+        asunto: `Monto manual de hotel — ${r.folio} (${solicitante.nombre})`,
+        cuerpo: cuerpoCorreoMonto(r, solicitante.nombre),
+        referencia: r.id,
+        estado: correoActivo ? "simulado" : "omitido",
+      });
+      registrarLog(
+        correoActivo ? "correo_enviado_simulado" : "correo_omitido",
+        "revision_monto",
+        r.id,
+        solicitante.id,
+        { para: u.correo },
+        ahora,
+      );
+    }
+  }
+  if (nuevosCorreos.length) lsSet(KEYS.correos, [...nuevosCorreos, ...correos]);
+  return nuevas;
+}
+
+// Compras acepta o rechaza el monto. Nadie revisa su propia solicitud.
+export function decidirRevision(
+  id: string,
+  decision: "aceptado" | "rechazado",
+  comentario: string,
+  usuarioId: string,
+  cuando: Date = new Date(),
+): "ok" | "no_encontrada" | "ya_resuelta" | "propia" {
+  const revs = lsGet<RevisionMontoManual[]>(KEYS.revisionesMonto, []);
+  const r = revs.find((x) => x.id === id);
+  if (!r) return "no_encontrada";
+  if (r.estado !== "pendiente") return "ya_resuelta";
+  if (r.user_id === usuarioId) return "propia";
+  lsSet(
+    KEYS.revisionesMonto,
+    revs.map((x) =>
+      x.id === id
+        ? {
+            ...x,
+            estado: decision,
+            decidido_por: usuarioId,
+            decidido_at: cuando.toISOString(),
+            comentario: comentario.trim() || undefined,
+          }
+        : x,
+    ),
+  );
+  registrarLog(
+    decision === "aceptado" ? "revision_aceptada" : "revision_rechazada",
+    "revision_monto",
+    id,
+    usuarioId,
+    { folio: r.folio, hotel: r.hotel_nombre, monto_manual: r.monto_manual, comentario: comentario.trim() },
+    cuando,
+  );
+  return "ok";
+}
+
+// Los roles de Compras (compras_corporativas y los creados a mano que empiezan con
+// "compras", p. ej. compras_corp) reciben el permiso; si el admin ya lo definió
+// (true o false) no se toca.
+function backfillRevisarMontoManual() {
+  const roles = lsGet<Role[]>(KEYS.roles, []);
+  const esCompras = (r: Role) => r.nombre.trim().toLowerCase().startsWith("compras");
+  if (!roles.some((r) => esCompras(r) && !("revisar_monto_manual" in r.permisos))) return;
+  lsSet(
+    KEYS.roles,
+    roles.map((r) =>
+      esCompras(r) && !("revisar_monto_manual" in r.permisos)
+        ? { ...r, permisos: { ...r.permisos, revisar_monto_manual: true } }
+        : r,
+    ),
+  );
+}
+
+// ── Escenarios de ejemplo: solicitudes con monto manual de hotel ──
+type EscenarioMonto = {
+  id: string;
+  correo: string;
+  empresa: string;
+  estado: string;
+  destino: string;
+  tipo: string;
+  motivo: string;
+  creada: string;
+  estancias: { hotel_id: number; inicio: string; fin: string; manual?: number }[];
+  foraneo: { tipo: string; monto: number };
+  local: { tipo: string; monto: number };
+  // Resolución de la revisión: hace cuántos días (0 = hoy) y comentario.
+  decision?: { tipo: "aceptado" | "rechazado"; haceDias: number; comentario: string };
+};
+
+const ESCENARIOS_MONTO: EscenarioMonto[] = [
+  {
+    // Pendiente (se ve en la campanita de Compras)
+    id: "s22", correo: "usuario2@cklass.com", empresa: "INTERMEDIARIA INTERMEX", estado: "Nuevo León",
+    destino: "GDL - Monterrey", tipo: "Comercial", motivo: "Reunión con distribuidores zona norte",
+    creada: "2026-10-26",
+    estancias: [{ hotel_id: 17, inicio: "2026-11-09", fin: "2026-11-12", manual: 1700 }],
+    foraneo: { tipo: "Avión", monto: 1800 }, local: { tipo: "Uber", monto: 500 },
+  },
+  {
+    // Pendiente: dos estancias, solo la primera con monto manual
+    id: "s23", correo: "usuario3@cklass.com", empresa: "TRANSPORTES DE PERSONAL Y MERCANCIA", estado: "Zacatecas",
+    destino: "GDL - Zacatecas", tipo: "Visita a proveedores", motivo: "Revisión de patio y proveedores locales",
+    creada: "2026-10-26",
+    estancias: [
+      { hotel_id: 26, inicio: "2026-11-16", fin: "2026-11-18", manual: 1250 },
+      { hotel_id: 27, inicio: "2026-11-18", fin: "2026-11-19" },
+    ],
+    foraneo: { tipo: "Autobús", monto: 1100 }, local: { tipo: "Uber", monto: 380 },
+  },
+  {
+    // Pendiente de varios días (sigue visible hasta que Compras la resuelva)
+    id: "s26", correo: "jefe@cklass.com", empresa: "INTERMEDIARIA INTERMEX", estado: "Querétaro",
+    destino: "GDL - Querétaro", tipo: "Capacitación", motivo: "Capacitación del equipo regional",
+    creada: "2026-10-24",
+    estancias: [{ hotel_id: 19, inicio: "2026-11-04", fin: "2026-11-06", manual: 1100 }],
+    foraneo: { tipo: "Autobús", monto: 700 }, local: { tipo: "Uber", monto: 250 },
+  },
+  {
+    // Aceptada HOY: aún aparece en la lista de Compras (desaparece mañana)
+    id: "s24", correo: "usuario@cklass.com", empresa: "WATA GROUP", estado: "CDMX",
+    destino: "GDL - CDMX", tipo: "Expos", motivo: "Participación en expo de proveedores",
+    creada: "2026-10-25",
+    estancias: [{ hotel_id: 7, inicio: "2026-11-02", fin: "2026-11-04", manual: 2400 }],
+    foraneo: { tipo: "Avión", monto: 1900 }, local: { tipo: "Uber", monto: 420 },
+    decision: {
+      tipo: "aceptado", haceDias: 0,
+      comentario: "Evento de la cámara en la ciudad; no hay tarifa corporativa disponible esas fechas.",
+    },
+  },
+  {
+    // Rechazada AYER: ya no aparece en la lista de Compras (solo en el detalle del folio)
+    id: "s25", correo: "usuario2@cklass.com", empresa: "INTERMEDIARIA INTERMEX", estado: "Guanajuato",
+    destino: "GDL - León", tipo: "Visita a tiendas", motivo: "Supervisión de tiendas zona León",
+    creada: "2026-10-23",
+    estancias: [{ hotel_id: 13, inicio: "2026-11-23", fin: "2026-11-26", manual: 1500 }],
+    foraneo: { tipo: "Autobús", monto: 650 }, local: { tipo: "Uber", monto: 300 },
+    decision: {
+      tipo: "rechazado", haceDias: 1,
+      comentario: "Excede la tarifa convenida; reservar en Fiesta Inn León ($790) o Hotel One León Norte ($620).",
+    },
+  },
+];
+
+function backfillEscenariosMontoManual() {
+  const users = lsGet<User[]>(KEYS.users, []);
+  const porCorreo = (c: string) => users.find((u) => u.correo === c);
+  const compras = porCorreo("compras@cklass.com");
+  const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
+  const pendientes = ESCENARIOS_MONTO.filter((e) => !solicitudes.some((x) => x.id === e.id));
+  if (!pendientes.length) return;
+
+  const hoteles = lsGet<Hotel[]>(KEYS.hoteles, []);
+  const destinos = lsGet<unknown[]>(KEYS.destinos, []);
+  const comprobantes = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  const nuevasSol: Solicitud[] = [];
+  const nuevosDest: unknown[] = [];
+  const nuevosCg: ComprobanteGasto[] = [];
+  const porRevisar: { e: EscenarioMonto; sol: Solicitud; dest: DestinoMonto }[] = [];
+
+  for (const e of pendientes) {
+    const viajero = porCorreo(e.correo);
+    if (!viajero) continue;
+    const folios = [...solicitudes, ...nuevasSol]
+      .map((x) => parseInt(x.folio.replace("#", ""), 10))
+      .filter((n) => !isNaN(n));
+    const folio = "#" + String(Math.max(40, ...folios) + 1).padStart(4, "0");
+
+    const inicio = e.estancias[0].inicio;
+    const fin = e.estancias[e.estancias.length - 1].fin;
+    const dias = Math.max(0, Math.floor((new Date(fin).getTime() - new Date(inicio).getTime()) / 86400000) + 1);
+    const stays = e.estancias.map((s, i) => {
+      const cat = hoteles.find((h) => h.id === s.hotel_id);
+      return {
+        id: `hh_${e.id}_${i + 1}`,
+        fecha_inicio: s.inicio,
+        fecha_fin: s.fin,
+        monto: s.manual ?? cat?.tarifa_base ?? 0,
+        manual: s.manual !== undefined,
+        hotel_id: s.hotel_id,
+      };
+    });
+    const hotelTotal = stays.reduce((a, h) => a + h.monto * nochesEntreIso(h.fecha_inicio, h.fecha_fin), 0);
+    const comida = dias * SEED_CONFIG.monto_comida_diario;
+    const total = hotelTotal + e.foraneo.monto + e.local.monto + comida;
+
+    const sol: Solicitud = {
+      id: e.id, folio, user_id: viajero.id,
+      fecha: e.creada.split("-").reverse().join("/"), empresa: e.empresa,
+      origen: "Guadalajara", destino_resumen: e.destino, tipo_viaje: e.tipo, motivo: e.motivo,
+      personas_count: 1, personas_nombres: viajero.nombre, monto_total: total,
+      jefe_status: "Pendiente",
+      finanzas_status: total > SEED_CONFIG.umbral_finanzas ? "Pendiente" : "N/A",
+      estatus: "Abierto", comprobante_viaje: null, created_at: e.creada,
+    };
+    nuevasSol.push(sol);
+    const dest: DestinoMonto & Record<string, unknown> = {
+      id: `dd_${e.id}`, solicitud_id: e.id, estado: e.estado,
+      fecha_inicio: inicio, fecha_fin: fin, hoteles: stays,
+      foraneo: [{ id: `rf_${e.id}`, tipo: e.foraneo.tipo, monto: e.foraneo.monto }],
+      local: [{ id: `rl_${e.id}`, tipo: e.local.tipo, monto: e.local.monto }],
+      otros: [],
+    };
+    nuevosDest.push(dest);
+    [
+      { concepto: "Hotel", monto: hotelTotal },
+      { concepto: e.foraneo.tipo, monto: e.foraneo.monto },
+      { concepto: e.local.tipo, monto: e.local.monto },
+      { concepto: "Comida", monto: comida },
+      { concepto: "Otros", monto: 0 },
+    ].forEach((r, i) =>
+      nuevosCg.push({
+        id: `cgm_${e.id}_${i + 1}`, solicitud_id: e.id, concepto: r.concepto,
+        monto_solicitado: r.monto, monto_comprobado: 0, status_renglon: "pendiente",
+      }),
+    );
+    porRevisar.push({ e, sol, dest });
+  }
+  if (!nuevasSol.length) return;
+  lsSet(KEYS.solicitudes, [...nuevasSol, ...solicitudes]);
+  lsSet(KEYS.destinos, [...destinos, ...nuevosDest]);
+  lsSet(KEYS.comprobantesGasto, [...comprobantes, ...nuevosCg]);
+
+  // Revisiones (campanita + correo + logs) con los mismos pasos que al guardar una solicitud.
+  for (const { e, sol, dest } of porRevisar) {
+    const viajero = porCorreo(e.correo);
+    if (!viajero) continue;
+    const ahora = new Date();
+    const creadas = crearRevisionesMontoManual(sol, [dest], viajero, ahora);
+    if (e.decision && compras) {
+      const cuando = new Date(ahora.getTime() - e.decision.haceDias * 86400000);
+      for (const r of creadas) {
+        decidirRevision(r.id, e.decision.tipo, e.decision.comentario, compras.id, cuando);
+      }
+    }
+  }
 }

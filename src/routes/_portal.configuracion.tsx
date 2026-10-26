@@ -4,7 +4,14 @@ import { Edit2, Plus, X, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth, useLocalStorage } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
-import { KEYS, type Sociedad, type Role, type User } from "@/lib/store";
+import {
+  KEYS,
+  type Sociedad,
+  type Role,
+  type User,
+  type CorreoSimulado,
+  type LogEvento,
+} from "@/lib/store";
 import { Switch } from "@/components/ui/switch";
 import { Modal } from "./_portal.solicitar";
 
@@ -65,6 +72,107 @@ const CONFIG_DEFAULTS: Config = {
   notif_plataforma_activo: true,
   revision_automatica_activo: true,
 };
+
+// Vista de apoyo (solo lectura): correos informativos "enviados" (simulados, aún sin
+// servidor de correo) y bitácora de eventos. Con la base de datos conectada, los logs
+// se guardan en una tabla `logs`.
+function BitacoraNotificaciones() {
+  const [correos] = useLocalStorage<CorreoSimulado[]>(KEYS.correos, []);
+  const [logs] = useLocalStorage<LogEvento[]>(KEYS.logs, []);
+  const [users] = useLocalStorage<User[]>(KEYS.users, []);
+  const [correo, setCorreo] = useState<CorreoSimulado | null>(null);
+  const nombre = (id: string | null) => users.find((u) => u.id === id)?.nombre ?? "—";
+  const fh = (iso: string) => new Date(iso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" });
+  const ultimosLogs = [...logs].sort((a, b) => b.fecha.localeCompare(a.fecha)).slice(0, 25);
+
+  return (
+    <div className="ckl-card p-5">
+      <h3 className="text-base font-semibold">Bitácora de notificaciones</h3>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Correos informativos a Compras por montos manuales de hotel (simulados: aún no hay servidor de
+        correo) y eventos registrados.
+      </p>
+
+      <div className="mt-4 text-sm font-semibold">Correos ({correos.length})</div>
+      <div className="mt-2 overflow-x-auto rounded-lg border">
+        <table className="w-full text-xs">
+          <thead className="bg-secondary text-left text-muted-foreground">
+            <tr>
+              <th className="p-2">Fecha</th>
+              <th className="p-2">Para</th>
+              <th className="p-2">Asunto</th>
+              <th className="p-2">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {correos.slice(0, 15).map((c) => (
+              <tr
+                key={c.id}
+                className="cursor-pointer border-t hover:bg-secondary/50"
+                onClick={() => setCorreo(c)}
+              >
+                <td className="whitespace-nowrap p-2">{fh(c.fecha)}</td>
+                <td className="p-2">{c.para}</td>
+                <td className="p-2">{c.asunto}</td>
+                <td className="p-2">{c.estado}</td>
+              </tr>
+            ))}
+            {correos.length === 0 && (
+              <tr>
+                <td colSpan={4} className="p-4 text-center text-muted-foreground">
+                  Sin correos.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-5 text-sm font-semibold">Logs (últimos {ultimosLogs.length})</div>
+      <div className="mt-2 overflow-x-auto rounded-lg border">
+        <table className="w-full text-xs">
+          <thead className="bg-secondary text-left text-muted-foreground">
+            <tr>
+              <th className="p-2">Fecha</th>
+              <th className="p-2">Tipo</th>
+              <th className="p-2">Usuario</th>
+              <th className="p-2">Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ultimosLogs.map((l) => (
+              <tr key={l.id} className="border-t align-top">
+                <td className="whitespace-nowrap p-2">{fh(l.fecha)}</td>
+                <td className="p-2 font-mono">{l.tipo}</td>
+                <td className="p-2">{nombre(l.usuario_id)}</td>
+                <td className="max-w-[360px] break-words p-2 text-muted-foreground">
+                  {JSON.stringify(l.detalle)}
+                </td>
+              </tr>
+            ))}
+            {ultimosLogs.length === 0 && (
+              <tr>
+                <td colSpan={4} className="p-4 text-center text-muted-foreground">
+                  Sin eventos.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {correo && (
+        <Modal onClose={() => setCorreo(null)}>
+          <h3 className="pr-6 text-base font-semibold">{correo.asunto}</h3>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Para: {correo.para} · {fh(correo.fecha)} · {correo.estado}
+          </div>
+          <pre className="mt-3 whitespace-pre-wrap rounded-md bg-secondary p-3 text-xs">{correo.cuerpo}</pre>
+        </Modal>
+      )}
+    </div>
+  );
+}
 
 function Configuracion() {
   const { hasPerm, role } = useAuth();
@@ -372,6 +480,8 @@ function Configuracion() {
           </div>
         </Modal>
       )}
+
+      <BitacoraNotificaciones />
 
       {editRole && (
         <Modal onClose={() => setEditRole(null)}>

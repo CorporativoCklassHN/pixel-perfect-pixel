@@ -2,7 +2,7 @@ import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, FilePlus2, ListChecks, ReceiptText, BarChart3,
-  Users, ShieldCheck, Settings, Menu, Bell, Plus, X,
+  Users, ShieldCheck, Settings, Menu, Plus, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -16,6 +16,7 @@ import {
 } from "@/lib/store";
 import { showErrorDialog } from "@/components/ErrorDialog";
 import { UserMenu } from "@/components/portal/UserMenu";
+import { NotificationBell } from "@/components/portal/NotificationBell";
 import cklassLogo from "@/cklass-logo.png";
 
 type Item = { to: string; label: string; icon: React.ComponentType<{ size?: number }>; perm?: string; section: string; badge?: number };
@@ -156,9 +157,7 @@ export function PortalLayout() {
               <Plus size={15} /> <span className="hidden sm:inline">Nueva solicitud</span>
             </button>
           )}
-          <button className="shrink-0 rounded-md p-2 hover:bg-secondary" title="Notificaciones">
-            <Bell size={18} />
-          </button>
+          <NotificationBell />
           <div className="mx-0.5 hidden h-8 w-px bg-border sm:block" />
           <UserMenu />
         </header>

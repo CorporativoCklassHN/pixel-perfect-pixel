@@ -25,6 +25,7 @@ import {
   avanceComprobacion,
   avanceValidacion,
   estatusVisible,
+  type RevisionMontoManual,
   ESTATUS_VISIBLES,
   type Solicitud,
   type User,
@@ -102,6 +103,7 @@ function Estatus() {
   const [destinosAll] = useLocalStorage<DestinoStored[]>(KEYS.destinos, []);
   const [comprobantesGasto] = useLocalStorage<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
   const [hotelesCatalogo] = useLocalStorage<Hotel[]>(KEYS.hoteles, []);
+  const [revisionesMonto] = useLocalStorage<RevisionMontoManual[]>(KEYS.revisionesMonto, []);
   const config = JSON.parse(typeof window !== "undefined" ? localStorage.getItem(KEYS.config) ?? "{}" : "{}");
   const umbral = config.umbral_finanzas ?? 5000;
   const diasComprobacionAtrasada = config.dias_comprobacion_atrasada ?? 7;
@@ -529,14 +531,49 @@ function Estatus() {
                       <div className="font-semibold text-muted-foreground">Hoteles</div>
                       {d.hoteles.map((h) => {
                         const noches = nightsBetween(h.fecha_inicio, h.fecha_fin);
-                        const subtotal = h.manual ? h.monto : noches * h.monto;
+                        // El monto de la estancia (de catálogo o manual) siempre es por noche.
+                        const subtotal = noches * h.monto;
+                        const rev = revisionesMonto.find(
+                          (r) => r.solicitud_id === detail.id && r.hotel_stay_id === h.id,
+                        );
                         return (
-                          <div key={h.id} className="mt-1 flex items-center justify-between gap-2">
-                            <span>
-                              {resolveHotelName(h, d.estado, hotelesCatalogo)} · {h.fecha_inicio} →{" "}
-                              {h.fecha_fin} {h.manual ? "" : `· ${noches} noche(s)`}
-                            </span>
-                            <span className="shrink-0 font-medium">{fmtMoney(subtotal)}</span>
+                          <div key={h.id} className="mt-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span>
+                                {resolveHotelName(h, d.estado, hotelesCatalogo)} · {h.fecha_inicio} →{" "}
+                                {h.fecha_fin} · {noches} noche(s) × {fmtMoney(h.monto)}
+                                {h.manual ? " (monto manual)" : ""}
+                              </span>
+                              <span className="shrink-0 font-medium">{fmtMoney(subtotal)}</span>
+                            </div>
+                            {rev && (
+                              <div
+                                className="mt-1 rounded px-2 py-1 text-[11px]"
+                                style={{
+                                  background:
+                                    rev.estado === "aceptado"
+                                      ? "#D8F3DC"
+                                      : rev.estado === "rechazado"
+                                        ? "#FEE9EA"
+                                        : "#FEF3C7",
+                                  color:
+                                    rev.estado === "aceptado"
+                                      ? "#2D6A4F"
+                                      : rev.estado === "rechazado"
+                                        ? "#B5040F"
+                                        : "#92400E",
+                                }}
+                              >
+                                <b>Compras:</b>{" "}
+                                {rev.estado === "pendiente"
+                                  ? "monto manual pendiente de revisión"
+                                  : `monto manual ${rev.estado}`}
+                                {rev.tarifa_default > 0
+                                  ? ` (predeterminado ${fmtMoney(rev.tarifa_default)} por noche)`
+                                  : ""}
+                                {rev.comentario ? ` — “${rev.comentario}”` : ""}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
