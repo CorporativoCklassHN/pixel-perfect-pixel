@@ -38,7 +38,7 @@ export function UserMenu() {
           >
             <span
               className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold text-white"
-              style={{ background: "#1F1F1F" }}
+              style={{ background: "var(--color-primary)" }}
             >
               {user.initials}
             </span>

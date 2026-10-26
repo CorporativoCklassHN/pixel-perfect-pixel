@@ -1129,7 +1129,7 @@ const CONTRASENAS_COMUNES = [
   "123456", "12345678", "iloveyou", "monkey", "dragon", "football", "futbol",
 ];
 
-export const PASSWORD_MIN_LENGTH = 12;
+export const PASSWORD_MIN_LENGTH = 6;
 
 export function evaluarContrasena(nueva: string, user: Pick<User, "correo" | "nombre">) {
   const lower = nueva.toLowerCase();
