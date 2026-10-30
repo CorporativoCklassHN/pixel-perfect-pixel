@@ -9,7 +9,7 @@ import { showErrorDialog } from "@/components/ErrorDialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  KEYS, lsGet, lsSet, fmtMoney, nextFolio, uid, bloqueoNuevaSolicitud, crearRevisionesMontoManual,
+  KEYS, lsGet, lsSet, fmtMoney, nextFolio, uid, bloqueoNuevaSolicitud, crearRevisionesMontoManual, tarifaHotel, fmtTarifa, type TipoHabitacion,
   type Hotel, type Solicitud, type ComprobanteGasto, type Autorizacion,
 } from "@/lib/store";
 
@@ -41,7 +41,15 @@ type HotelStay = {
   monto: number;
   manual: boolean;
   hotel_id: number;
+  // Tipo de habitación elegido (ausente = sencilla). Fija la tarifa predeterminada.
+  tipo_habitacion?: TipoHabitacion;
+  // Por qué se cambió el monto respecto al predeterminado (obligatorio si es distinto).
+  motivo_cambio?: string;
 };
+
+// Gastos de automóvil de un destino: la gasolina se paga directo con la tarjeta de la
+// empresa; la caseta se deposita al viajero.
+type Automovil = { gasolina: number; caseta: number };
 
 type Destino = {
   id: string;
@@ -51,7 +59,8 @@ type Destino = {
   hoteles: HotelStay[];
   foraneo: Row[];
   local: Row[];
-  otros: OtroRow[];
+  otros: OtroRow[]; // "Vales"
+  automovil: Automovil;
 };
 
 function newHotelStay(fecha_inicio = ""): HotelStay {
@@ -64,6 +73,7 @@ function newDestino(): Destino {
     fecha_inicio: "", fecha_fin: "",
     hoteles: [newHotelStay()],
     foraneo: [], local: [], otros: [],
+    automovil: { gasolina: 0, caseta: 0 },
   };
 }
 
@@ -93,6 +103,10 @@ function normalizeDestino(raw: any): Destino {
     foraneo: raw.foraneo ?? [],
     local: raw.local ?? [],
     otros: raw.otros ?? [],
+    automovil: {
+      gasolina: Number(raw.automovil?.gasolina) || 0,
+      caseta: Number(raw.automovil?.caseta) || 0,
+    },
   };
 }
 
@@ -198,6 +212,8 @@ function Solicitar() {
       avion = 0,
       local = 0,
       otros = 0,
+      gasolina = 0,
+      caseta = 0,
       hotel = 0,
       diasTot = 0;
     for (const d of destinos) {
@@ -213,14 +229,21 @@ function Solicitar() {
         .reduce((a, r) => a + (Number(r.monto) || 0), 0);
       local += d.local.reduce((a, r) => a + (Number(r.monto) || 0), 0);
       otros += d.otros.reduce((a, r) => a + (Number(r.monto) || 0), 0);
+      gasolina += Number(d.automovil.gasolina) || 0;
+      caseta += Number(d.automovil.caseta) || 0;
       diasTot += daysBetween(d.fecha_inicio, d.fecha_fin);
     }
     const comida = diasTot * config.monto_comida_diario * personas;
-    const total = comida + foraneo + local + otros + hotel;
-    // Hotel y Avión se pagan directo con la tarjeta corporativa: no se depositan al viajero.
-    const pagoDirecto = hotel + avion;
+    const automovil = gasolina + caseta;
+    const total = comida + foraneo + local + otros + hotel + automovil;
+    // Hotel, Avión y Gasolina se pagan directo con la tarjeta corporativa: no se depositan
+    // al viajero. La caseta sí se deposita (queda dentro del total a depositar).
+    const pagoDirecto = hotel + avion + gasolina;
     const deposito = total - pagoDirecto;
-    return { comida, foraneo, local, otros, hotel, avion, total, pagoDirecto, deposito, diasTot };
+    return {
+      comida, foraneo, local, otros, hotel, avion, gasolina, caseta, automovil,
+      total, pagoDirecto, deposito, diasTot,
+    };
   }, [destinos, personas, config.monto_comida_diario]);
 
   const requiresFin = totals.total > config.umbral_finanzas;
@@ -256,6 +279,15 @@ function Solicitar() {
         }
         if (hi > 0 && h.fecha_inicio < d.hoteles[hi - 1].fecha_fin) {
           return showErrorDialog(`Las fechas del hotel ${hi + 1} se empalman con el hotel ${hi} (destino ${i + 1}).`);
+        }
+      }
+      for (let hi = 0; hi < d.hoteles.length; hi++) {
+        const h = d.hoteles[hi];
+        const predeterminado = tarifaHotel(hoteles.find((x) => x.id === h.hotel_id), h.tipo_habitacion);
+        if (h.manual && h.monto > 0 && h.monto !== predeterminado && !h.motivo_cambio?.trim()) {
+          return showErrorDialog(
+            `Captura el motivo del cambio de monto del hotel ${hi + 1} en el destino ${i + 1}.`,
+          );
         }
       }
       // Un destino con al menos una noche requiere hotel, se haya tocado o no la
@@ -329,8 +361,18 @@ function Solicitar() {
     const list = lsGet<Solicitud[]>(KEYS.solicitudes, []);
     lsSet(KEYS.solicitudes, editing ? list.map((s) => (s.id === solId ? sol : s)) : [sol, ...list]);
 
+    // El motivo solo se conserva en las estancias con monto manual distinto al predeterminado.
+    const destinosGuardar = destinos.map((d) => ({
+      ...d,
+      solicitud_id: solId,
+      hoteles: d.hoteles.map((h) => {
+        const predeterminado = tarifaHotel(hoteles.find((x) => x.id === h.hotel_id), h.tipo_habitacion);
+        const cambia = h.manual && h.monto > 0 && h.monto !== predeterminado;
+        return { ...h, motivo_cambio: cambia ? h.motivo_cambio?.trim() || undefined : undefined };
+      }),
+    }));
     const dList = lsGet<any[]>(KEYS.destinos, []).filter((d) => d.solicitud_id !== solId);
-    lsSet(KEYS.destinos, [...dList, ...destinos.map((d) => ({ ...d, solicitud_id: solId }))]);
+    lsSet(KEYS.destinos, [...dList, ...destinosGuardar]);
 
     const cg = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []).filter(
       (c) => c.solicitud_id !== solId,
@@ -385,10 +427,14 @@ function Solicitar() {
         monto_comprobado: 0,
         status_renglon: "pendiente",
       },
+      // La gasolina NO se comprueba (no genera renglón); la caseta sí.
+      ...(totals.caseta > 0
+        ? [{ id: uid("cg_"), solicitud_id: solId, concepto: "Caseta", monto_solicitado: totals.caseta, monto_comprobado: 0, status_renglon: "pendiente" as const }]
+        : []),
       {
         id: uid("cg_"),
         solicitud_id: solId,
-        concepto: "Otros",
+        concepto: "Vales",
         monto_solicitado: totals.otros,
         monto_comprobado: 0,
         status_renglon: "pendiente",
@@ -398,7 +444,7 @@ function Solicitar() {
 
     // Hoteles con "Monto manual" distinto al predeterminado: Compras recibe alerta en la
     // campanita y un correo informativo, y decide aceptar o rechazar (con comentario).
-    if (user) crearRevisionesMontoManual({ id: solId, folio: folioFinal }, destinos, user);
+    if (user) crearRevisionesMontoManual({ id: solId, folio: folioFinal }, destinosGuardar, user);
 
     setFolio(folioFinal);
     toast.success(
@@ -510,16 +556,20 @@ function Solicitar() {
 
       {/* Totals bar */}
       <div className="sticky bottom-0 z-20 -mx-4 border-t bg-white p-4 shadow-[0_-4px_24px_rgba(0,0,0,0.06)] md:-mx-6">
-        <div className="mx-auto grid max-w-6xl grid-cols-2 gap-3 md:grid-cols-7">
+        <div className="mx-auto grid max-w-6xl grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
           <Tot label="Comida" v={totals.comida} />
           <Tot label="Trans. foráneo" v={totals.foraneo} />
           <Tot label="Trans. local" v={totals.local} />
-          <Tot label="Otros" v={totals.otros} />
+          <Tot label="Vales" v={totals.otros} />
           <Tot label="Hotel" v={totals.hotel} />
-          <div title="Hotel + Avión: se pagan directo con la tarjeta corporativa y no se depositan al viajero">
+          <div title="Gasolina + Caseta">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Automóvil</div>
+            <div className="text-sm font-semibold">{fmtMoney(totals.automovil)}</div>
+          </div>
+          <div title="Hotel + Avión + Gasolina: se pagan directo con la tarjeta corporativa y no se depositan al viajero">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Pago directo empresa</div>
             <div className="text-xl font-bold" style={{ color: "#228B22" }}>{fmtMoney(totals.pagoDirecto)}</div>
-            <div className="text-[10px] text-muted-foreground">Hotel + Avión</div>
+            <div className="text-[10px] text-muted-foreground">Hotel + Avión + Gasolina</div>
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total a depositar</div>
@@ -651,6 +701,11 @@ function DestinoBlock({
   onRemove?: () => void;
 }) {
   const filteredHotels = hoteles.filter((h) => h.estado === d.estado && h.activo);
+  // Destinos disponibles: los de siempre + los estados de hoteles activos del catálogo
+  // (los convenios nuevos abren destinos nuevos).
+  const estadosDisponibles = [
+    ...new Set([...ESTADOS, ...hoteles.filter((h) => h.activo).map((h) => h.estado)]),
+  ];
   const days = daysBetween(d.fecha_inicio, d.fecha_fin);
 
   const updateHotel = (hid: string, patch: Partial<HotelStay>) =>
@@ -673,11 +728,11 @@ function DestinoBlock({
           onChange={(e) =>
             onChange({
               estado: e.target.value,
-              hoteles: d.hoteles.map((h) => ({ ...h, monto: 0, hotel_id: 0 })),
+              hoteles: d.hoteles.map((h) => ({ ...h, monto: 0, hotel_id: 0, tipo_habitacion: "sencilla" as const })),
             })
           }
         >
-          {ESTADOS.map((s) => <option key={s}>{s}</option>)}
+          {estadosDisponibles.map((s) => <option key={s}>{s}</option>)}
         </select>
         <DateField
           className="max-w-[150px]"
@@ -737,20 +792,37 @@ function DestinoBlock({
                   <div className="min-w-[200px] flex-1">
                     <select
                       className="ckl-input"
-                      value={h.hotel_id}
+                      value={`${h.hotel_id}:${h.tipo_habitacion ?? "sencilla"}`}
                       onChange={(e) => {
-                        const hotel_id = +e.target.value;
+                        // El valor es "id:tipo" (sencilla / doble)
+                        const [idTxt, tipoTxt] = e.target.value.split(":");
+                        const hotel_id = +idTxt;
+                        const tipo_habitacion: TipoHabitacion = tipoTxt === "doble" ? "doble" : "sencilla";
                         const chosen = filteredHotels.find((ho) => ho.id === hotel_id);
                         updateHotel(h.id, {
                           hotel_id,
-                          monto: h.manual ? h.monto : (chosen?.tarifa_base ?? 0),
+                          tipo_habitacion,
+                          monto: h.manual ? h.monto : tarifaHotel(chosen, tipo_habitacion),
                         });
                       }}
                     >
-                      <option value={0}>— Seleccionar —</option>
-                      {filteredHotels.map((ho) => (
-                        <option key={ho.id} value={ho.id}>{ho.nombre} — {fmtMoney(ho.tarifa_base)}</option>
-                      ))}
+                      <option value="0:sencilla">— Seleccionar —</option>
+                      {filteredHotels.flatMap((ho) =>
+                        ho.tarifa_doble && ho.tarifa_doble > 0
+                          ? [
+                              <option key={`${ho.id}:s`} value={`${ho.id}:sencilla`}>
+                                {ho.nombre} — Sencilla {fmtTarifa(ho.tarifa_base)}
+                              </option>,
+                              <option key={`${ho.id}:d`} value={`${ho.id}:doble`}>
+                                {ho.nombre} — Doble {fmtTarifa(ho.tarifa_doble)}
+                              </option>,
+                            ]
+                          : [
+                              <option key={ho.id} value={`${ho.id}:sencilla`}>
+                                {ho.nombre} — {fmtTarifa(ho.tarifa_base)}
+                              </option>,
+                            ],
+                      )}
                     </select>
                   </div>
                   <DateField
@@ -816,10 +888,25 @@ function DestinoBlock({
                       placeholder="Monto por noche"
                     />
                   )}
+                  {/* Si el monto es distinto al predeterminado se pide el motivo del cambio
+                      (le llega a Compras junto con el aviso de revisión). */}
+                  {h.manual &&
+                    h.monto > 0 &&
+                    h.monto !== tarifaHotel(filteredHotels.find((x) => x.id === h.hotel_id), h.tipo_habitacion) && (
+                      <input
+                        className="ckl-input min-w-[220px] flex-1"
+                        value={h.motivo_cambio ?? ""}
+                        onChange={(e) => updateHotel(h.id, { motivo_cambio: e.target.value })}
+                        placeholder="Motivo del cambio de monto (obligatorio)"
+                        maxLength={200}
+                        aria-label="Motivo del cambio de monto"
+                      />
+                    )}
                 </div>
                 {h.monto > 0 && (
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    {hNights} noche(s) × {fmtMoney(h.monto)} = <b>{fmtMoney(hNights * h.monto)}</b>
+                    {h.tipo_habitacion === "doble" ? "Habitación doble · " : ""}
+                    {hNights} noche(s) × {fmtTarifa(h.monto)} = <b>{fmtMoney(hNights * h.monto)}</b>
                   </p>
                 )}
               </div>
@@ -831,6 +918,10 @@ function DestinoBlock({
       <RowsSection title="Transporte foráneo" medios={MEDIOS_FORANEO} rows={d.foraneo} onChange={(rs) => onChange({ foraneo: rs })} />
       <RowsSection title="Transporte local" medios={MEDIOS_LOCAL} rows={d.local} onChange={(rs) => onChange({ local: rs })} />
       <OtrosSection rows={d.otros} onChange={(rs) => onChange({ otros: rs })} />
+      <AutomovilSection
+        value={d.automovil}
+        onChange={(automovil) => onChange({ automovil })}
+      />
     </div>
   );
 }
@@ -869,12 +960,57 @@ function RowsSection({ title, medios, rows, onChange }: { title: string; medios:
   );
 }
 
+// Gastos de automóvil del destino: Gasolina (pago directo empresa) y Caseta (se deposita).
+function AutomovilSection({
+  value,
+  onChange,
+}: {
+  value: Automovil;
+  onChange: (v: Automovil) => void;
+}) {
+  const campo = (
+    label: string,
+    nota: string,
+    clave: keyof Automovil,
+  ) => (
+    <div className="min-w-[180px] flex-1">
+      <label className="ckl-label">
+        {label} <span className="font-normal text-muted-foreground">({nota})</span>
+      </label>
+      <input
+        type="number"
+        min={0}
+        className="ckl-input"
+        placeholder="Monto"
+        value={value[clave]}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => onChange({ ...value, [clave]: +e.target.value })}
+        onWheel={(e) => e.currentTarget.blur()}
+      />
+    </div>
+  );
+  return (
+    <div className="mt-4">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-semibold">Automóvil</span>
+        <span className="text-xs text-muted-foreground">
+          Suma: <b>{fmtMoney((Number(value.gasolina) || 0) + (Number(value.caseta) || 0))}</b>
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-3">
+        {campo("Gasolina", "pago directo empresa", "gasolina")}
+        {campo("Caseta", "se deposita", "caseta")}
+      </div>
+    </div>
+  );
+}
+
 function OtrosSection({ rows, onChange }: { rows: OtroRow[]; onChange: (r: OtroRow[]) => void }) {
   return (
     <div className="mt-4">
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">Otros conceptos</span>
+          <span className="text-sm font-semibold">Vales</span>
           <span className="text-[11px] text-muted-foreground">(Poner el monto total del viático)</span>
         </div>
         <button onClick={() => onChange([...rows, { id: uid("o_"), concepto: "", monto: 0 }])} className="ckl-btn-ghost"><Plus size={12} /> Agregar</button>

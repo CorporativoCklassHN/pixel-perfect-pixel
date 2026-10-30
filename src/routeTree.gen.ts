@@ -14,6 +14,7 @@ import { Route as PortalRouteImport } from './routes/_portal'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PortalComprobacionRouteImport } from './routes/_portal.comprobacion'
 import { Route as PortalConfiguracionRouteImport } from './routes/_portal.configuracion'
+import { Route as PortalConveniosRouteImport } from './routes/_portal.convenios'
 import { Route as PortalDashboardRouteImport } from './routes/_portal.dashboard'
 import { Route as PortalEstatusRouteImport } from './routes/_portal.estatus'
 import { Route as PortalPermisosRouteImport } from './routes/_portal.permisos'
@@ -43,6 +44,11 @@ const PortalComprobacionRoute = PortalComprobacionRouteImport.update({
 const PortalConfiguracionRoute = PortalConfiguracionRouteImport.update({
   id: '/configuracion',
   path: '/configuracion',
+  getParentRoute: () => PortalRoute,
+} as any)
+const PortalConveniosRoute = PortalConveniosRouteImport.update({
+  id: '/convenios',
+  path: '/convenios',
   getParentRoute: () => PortalRoute,
 } as any)
 const PortalDashboardRoute = PortalDashboardRouteImport.update({
@@ -81,6 +87,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/comprobacion': typeof PortalComprobacionRoute
   '/configuracion': typeof PortalConfiguracionRoute
+  '/convenios': typeof PortalConveniosRoute
   '/dashboard': typeof PortalDashboardRoute
   '/estatus': typeof PortalEstatusRoute
   '/permisos': typeof PortalPermisosRoute
@@ -93,6 +100,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/comprobacion': typeof PortalComprobacionRoute
   '/configuracion': typeof PortalConfiguracionRoute
+  '/convenios': typeof PortalConveniosRoute
   '/dashboard': typeof PortalDashboardRoute
   '/estatus': typeof PortalEstatusRoute
   '/permisos': typeof PortalPermisosRoute
@@ -107,6 +115,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_portal/comprobacion': typeof PortalComprobacionRoute
   '/_portal/configuracion': typeof PortalConfiguracionRoute
+  '/_portal/convenios': typeof PortalConveniosRoute
   '/_portal/dashboard': typeof PortalDashboardRoute
   '/_portal/estatus': typeof PortalEstatusRoute
   '/_portal/permisos': typeof PortalPermisosRoute
@@ -121,6 +130,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/comprobacion'
     | '/configuracion'
+    | '/convenios'
     | '/dashboard'
     | '/estatus'
     | '/permisos'
@@ -133,6 +143,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/comprobacion'
     | '/configuracion'
+    | '/convenios'
     | '/dashboard'
     | '/estatus'
     | '/permisos'
@@ -146,6 +157,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/_portal/comprobacion'
     | '/_portal/configuracion'
+    | '/_portal/convenios'
     | '/_portal/dashboard'
     | '/_portal/estatus'
     | '/_portal/permisos'
@@ -197,6 +209,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PortalConfiguracionRouteImport
       parentRoute: typeof PortalRoute
     }
+    '/_portal/convenios': {
+      id: '/_portal/convenios'
+      path: '/convenios'
+      fullPath: '/convenios'
+      preLoaderRoute: typeof PortalConveniosRouteImport
+      parentRoute: typeof PortalRoute
+    }
     '/_portal/dashboard': {
       id: '/_portal/dashboard'
       path: '/dashboard'
@@ -245,6 +264,7 @@ declare module '@tanstack/react-router' {
 interface PortalRouteChildren {
   PortalComprobacionRoute: typeof PortalComprobacionRoute
   PortalConfiguracionRoute: typeof PortalConfiguracionRoute
+  PortalConveniosRoute: typeof PortalConveniosRoute
   PortalDashboardRoute: typeof PortalDashboardRoute
   PortalEstatusRoute: typeof PortalEstatusRoute
   PortalPermisosRoute: typeof PortalPermisosRoute
@@ -256,6 +276,7 @@ interface PortalRouteChildren {
 const PortalRouteChildren: PortalRouteChildren = {
   PortalComprobacionRoute: PortalComprobacionRoute,
   PortalConfiguracionRoute: PortalConfiguracionRoute,
+  PortalConveniosRoute: PortalConveniosRoute,
   PortalDashboardRoute: PortalDashboardRoute,
   PortalEstatusRoute: PortalEstatusRoute,
   PortalPermisosRoute: PortalPermisosRoute,

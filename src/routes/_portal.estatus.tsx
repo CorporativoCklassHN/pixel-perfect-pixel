@@ -56,6 +56,8 @@ type HotelStayStored = {
   monto: number;
   manual: boolean;
   hotel_id?: number;
+  motivo_cambio?: string;
+  tipo_habitacion?: "sencilla" | "doble";
 };
 type RowStored = { id: string; tipo: string; monto: number };
 type OtroRowStored = { id: string; concepto: string; monto: number };
@@ -68,7 +70,8 @@ type DestinoStored = {
   hoteles: HotelStayStored[];
   foraneo: RowStored[];
   local: RowStored[];
-  otros: OtroRowStored[];
+  otros: OtroRowStored[]; // "Vales"
+  automovil?: { gasolina: number; caseta: number };
 };
 
 function daysBetween(a: string, b: string) {
@@ -558,6 +561,7 @@ function Estatus() {
                               <span>
                                 {resolveHotelName(h, d.estado, hotelesCatalogo)} · {h.fecha_inicio} →{" "}
                                 {h.fecha_fin} · {noches} noche(s) × {fmtMoney(h.monto)}
+                                {h.tipo_habitacion === "doble" ? " · Habitación doble" : ""}
                                 {h.manual ? " (monto manual)" : ""}
                               </span>
                               <span className="shrink-0 font-medium">{fmtMoney(subtotal)}</span>
@@ -590,6 +594,11 @@ function Estatus() {
                                 {rev.comentario ? ` — “${rev.comentario}”` : ""}
                               </div>
                             )}
+                            {(rev?.motivo ?? h.motivo_cambio) && (
+                              <div className="mt-1 text-[11px] text-muted-foreground">
+                                <b>Motivo del cambio de monto:</b> {rev?.motivo ?? h.motivo_cambio}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -620,9 +629,27 @@ function Estatus() {
                     </div>
                   )}
 
+                  {d.automovil && (d.automovil.gasolina > 0 || d.automovil.caseta > 0) && (
+                    <div className="mt-2">
+                      <div className="font-semibold text-muted-foreground">Automóvil</div>
+                      {d.automovil.gasolina > 0 && (
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <span>Gasolina (pago directo empresa)</span>
+                          <span className="font-medium">{fmtMoney(d.automovil.gasolina)}</span>
+                        </div>
+                      )}
+                      {d.automovil.caseta > 0 && (
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <span>Caseta (se deposita)</span>
+                          <span className="font-medium">{fmtMoney(d.automovil.caseta)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {d.otros?.length > 0 && (
                     <div className="mt-2">
-                      <div className="font-semibold text-muted-foreground">Otros conceptos</div>
+                      <div className="font-semibold text-muted-foreground">Vales</div>
                       {d.otros.map((r) => (
                         <div key={r.id} className="mt-1 flex items-center justify-between gap-2">
                           <span>{r.concepto || "—"}</span>

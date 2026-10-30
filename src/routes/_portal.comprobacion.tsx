@@ -2,8 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Upload,
-  FileText,
-  FileCode,
+  Paperclip,
   Trash2,
   Eye,
   Download,
@@ -21,11 +20,18 @@ import {
   uid,
   avanceComprobacion,
   avanceValidacion,
+  agruparFacturas,
+  conceptoRequierePar,
+  type Factura,
   type Solicitud,
   type ComprobanteGasto,
   type Sociedad,
   type User,
 } from "@/lib/store";
+import {
+  SubirComprobanteDialog,
+  type ArchivosComprobante,
+} from "@/components/portal/SubirComprobanteDialog";
 
 export const Route = createFileRoute("/_portal/comprobacion")({
   // solicitudId: folio a dejar seleccionado al llegar (p. ej. desde "Comprobar gastos" en Estatus).
@@ -36,24 +42,6 @@ export const Route = createFileRoute("/_portal/comprobacion")({
   head: () => ({ meta: [{ title: "Comprobación — CKL" }] }),
   component: Comprobacion,
 });
-
-type Factura = {
-  id: string;
-  solicitud_id: string;
-  tipo: "XML" | "PDF";
-  fecha: string;
-  uuid: string;
-  archivo: string;
-  total: number;
-  status: "Verificado" | "Error";
-  // Renglón de la tabla de comprobación al que se aplicó este monto, y cuánto se le aplicó
-  // (puede ser menor a `total` si el renglón se saturó). Permite revertir exacto al eliminar.
-  concepto_id: string | null;
-  monto_aplicado: number;
-  // Data URL (base64) del archivo, para poder verlo/descargarlo después sin
-  // pedirlo de nuevo — localStorage no puede guardar un File/Blob tal cual.
-  contenido: string;
-};
 
 function readAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -112,7 +100,7 @@ function Comprobacion() {
   const soloValidador = validador && !puedeComprobar;
   // Gestor de vuelos solo debe ver/comprobar el concepto "Avión" de cada
   // folio — el resto (Hotel, Transporte foráneo terrestre, Transporte local,
-  // Comida, Otros) y las secciones de No deducibles/Depósito sobrante no le
+  // Comida, Vales) y las secciones de No deducibles/Depósito sobrante no le
   // corresponden.
   const soloAvion = role?.nombre === "gestor_vuelos";
   const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
@@ -165,81 +153,106 @@ function Comprobacion() {
   const addLog = (line: string) =>
     setLog((l) => [`${new Date().toTimeString().slice(0, 8)} ${line}`, ...l].slice(0, 50));
 
-  // El renglón a comprobar (concepto) se recibe explícito desde el botón que
-  // se presionó en esa fila de la tabla — ya no se adivina tomando "el primer
-  // renglón pendiente", que podía aplicar una factura de hotel al concepto
-  // de transporte por simple coincidencia de orden.
-  const onFile = (kind: "XML" | "PDF", concepto: ComprobanteGasto) => {
-    const inp = document.createElement("input");
-    inp.type = "file";
-    inp.accept = kind === "XML" ? ".xml" : ".pdf,.jpg,.png";
-    inp.onchange = async () => {
-      const file = inp.files?.[0];
-      if (!file || !sel) return;
-      if (fs.some((f) => f.archivo === file.name)) {
-        addLog(`✖ Archivo duplicado: ${file.name}`);
-        showErrorDialog(`El archivo "${file.name}" ya fue cargado para esta solicitud.`);
-        return;
+  const [adjuntando, setAdjuntando] = useState<ComprobanteGasto | null>(null);
+
+  // Procesa el comprobante de un concepto desde el diálogo "Adjuntar": para los conceptos
+  // con factura exige el par XML + PDF y solo entonces suma al comprobado (el monto sale del
+  // Total del XML); los vales llevan un solo archivo (foto o PDF). Si algo no valida no se
+  // guarda nada. Devuelve true si se guardó (el diálogo se cierra).
+  const subirComprobante = async (
+    concepto: ComprobanteGasto,
+    archivos: ArchivosComprobante,
+  ): Promise<boolean> => {
+    if (!sel) return false;
+    const esVales = concepto.concepto === "Vales";
+    if (esVales ? !archivos.pdf : !archivos.xml || !archivos.pdf) {
+      showErrorDialog(
+        esVales
+          ? "Sube una foto o un PDF de los vales."
+          : "Para comprobar este concepto debes subir el XML y el PDF juntos.",
+      );
+      return false;
+    }
+    for (const f of [archivos.xml, archivos.pdf]) {
+      if (f && fs.some((x) => x.archivo === f.name)) {
+        addLog(`✖ Archivo duplicado: ${f.name}`);
+        showErrorDialog(`El archivo "${f.name}" ya fue cargado para esta solicitud.`);
+        return false;
       }
-      const total = Math.floor(Math.random() * 800) + 200;
-      let status: "Verificado" | "Error" = "Verificado";
-      const uuidv = uid("UUID-").toUpperCase();
-      if (kind === "XML") {
-        const text = await file.text();
-        if (!text.includes("cfdi:Emisor") && !text.toLowerCase().includes("emisor")) {
-          addLog(`✖ Nodo cfdi:Emisor no encontrado`);
-          status = "Error";
-        } else {
-          const rfcMatch = text.match(/Receptor[^>]*Rfc=["']([^"']+)["']/i);
-          const rfcEsperado = solSociedad?.rfc;
-          if (rfcMatch && rfcEsperado && rfcMatch[1].toUpperCase() !== rfcEsperado.toUpperCase()) {
-            addLog(`✖ RFC del Receptor no coincide (esperado: ${rfcEsperado})`);
-            status = "Error";
-          } else {
-            addLog(`✔ XML verificado CFDI 4.0 para "${concepto.concepto}". UUID: ${uuidv}`);
-          }
-        }
-      } else {
-        addLog(`✔ PDF cargado para "${concepto.concepto}": ${file.name}`);
+    }
+
+    const uuidv = uid("UUID-").toUpperCase();
+    let total = Math.floor(Math.random() * 800) + 200; // simulado si el archivo no trae Total
+    if (!esVales && archivos.xml) {
+      const text = await archivos.xml.text();
+      if (!text.includes("cfdi:Emisor") && !text.toLowerCase().includes("emisor")) {
+        addLog("✖ Nodo cfdi:Emisor no encontrado");
+        showErrorDialog("El XML no es un CFDI válido (falta el Emisor). No se guardó el comprobante.");
+        return false;
       }
-      let montoAplicado = 0;
-      if (status === "Verificado") {
-        montoAplicado = Math.min(total, concepto.monto_solicitado - concepto.monto_comprobado);
-        setComprobantes(
-          comprobantes.map((c) =>
-            c.id === concepto.id
-              ? {
-                  ...c,
-                  monto_comprobado: c.monto_comprobado + montoAplicado,
-                  status_renglon:
-                    c.monto_comprobado + montoAplicado >= c.monto_solicitado
-                      ? "comprobado"
-                      : "parcialmente_comprobado",
-                }
-              : c,
-          ),
+      const rfcMatch = text.match(/Receptor[^>]*Rfc=["']([^"']+)["']/i);
+      const rfcEsperado = solSociedad?.rfc;
+      if (rfcMatch && rfcEsperado && rfcMatch[1].toUpperCase() !== rfcEsperado.toUpperCase()) {
+        addLog(`✖ RFC del Receptor no coincide (esperado: ${rfcEsperado})`);
+        showErrorDialog(
+          `El RFC del receptor del XML no coincide con la sociedad (${rfcEsperado}). No se guardó el comprobante.`,
         );
-        toast.success(`Comprobante de "${concepto.concepto}" cargado y verificado.`);
-      } else {
-        showErrorDialog("Error de validación. Revisa el log.");
+        return false;
       }
-      const contenido = await readAsDataURL(file);
-      const factura: Factura = {
-        id: uid("f_"),
-        solicitud_id: sid,
-        tipo: kind,
-        fecha: new Date().toLocaleDateString("es-MX"),
-        uuid: uuidv,
-        archivo: file.name,
-        total,
-        status,
-        concepto_id: concepto.id,
-        monto_aplicado: montoAplicado,
-        contenido,
-      };
-      setFacturas([factura, ...facturas]);
-    };
-    inp.click();
+      // Total del CFDI (atributo Total del Comprobante; SubTotal no coincide por el \s previo)
+      const t = text.match(/\sTotal=["']([0-9][0-9.,]*)["']/i);
+      const leido = t ? parseFloat(t[1].replace(/,/g, "")) : NaN;
+      if (leido > 0) total = leido;
+    }
+
+    const pendiente = concepto.monto_solicitado - concepto.monto_comprobado;
+    const montoAplicado = Math.min(total, pendiente);
+    if (montoAplicado <= 0) {
+      showErrorDialog("Este concepto ya está comprobado por completo.");
+      return false;
+    }
+
+    const fecha = new Date().toLocaleDateString("es-MX");
+    const parId = esVales ? undefined : uid("par_");
+    const base = { solicitud_id: sid, fecha, uuid: uuidv, total, status: "Verificado" as const, concepto_id: concepto.id, par_id: parId };
+    const nuevas: Factura[] = [];
+    if (!esVales && archivos.xml) {
+      nuevas.push({
+        ...base, id: uid("f_"), tipo: "XML", archivo: archivos.xml.name,
+        monto_aplicado: montoAplicado, contenido: await readAsDataURL(archivos.xml),
+      });
+    }
+    if (archivos.pdf) {
+      nuevas.push({
+        ...base, id: uid("f_"),
+        tipo: esVales && /\.(jpe?g|png)$/i.test(archivos.pdf.name) ? "FOTO" : "PDF",
+        archivo: archivos.pdf.name,
+        monto_aplicado: esVales ? montoAplicado : 0,
+        contenido: await readAsDataURL(archivos.pdf),
+      });
+    }
+    setFacturas([...nuevas, ...facturas]);
+    setComprobantes(
+      comprobantes.map((c) =>
+        c.id === concepto.id
+          ? {
+              ...c,
+              monto_comprobado: c.monto_comprobado + montoAplicado,
+              status_renglon:
+                c.monto_comprobado + montoAplicado >= c.monto_solicitado
+                  ? "comprobado"
+                  : "parcialmente_comprobado",
+            }
+          : c,
+      ),
+    );
+    addLog(
+      esVales
+        ? `✔ Comprobante de vales cargado: ${archivos.pdf!.name}`
+        : `✔ XML + PDF verificados para "${concepto.concepto}". UUID: ${uuidv} · Total ${fmtMoney(total)}`,
+    );
+    toast.success(`Comprobante de "${concepto.concepto}" cargado y verificado.`);
+    return true;
   };
 
   // ── Validación de Compras Corporativas
@@ -267,14 +280,17 @@ function Comprobacion() {
     toast.success("Nota guardada.");
   };
 
-  const removeFactura = (id: string) => {
-    const f = facturas.find((x) => x.id === id);
-    setFacturas(facturas.filter((x) => x.id !== id));
-    if (f?.concepto_id && f.monto_aplicado > 0) {
+  // Elimina el comprobante completo (XML + PDF) y revierte lo que aplicó al renglón.
+  const removeGrupo = (g: Factura[]) => {
+    const ids = new Set(g.map((f) => f.id));
+    const aplicado = g.reduce((a, f) => a + f.monto_aplicado, 0);
+    const conceptoId = g.find((f) => f.concepto_id)?.concepto_id;
+    setFacturas(facturas.filter((x) => !ids.has(x.id)));
+    if (conceptoId && aplicado > 0) {
       setComprobantes(
         comprobantes.map((c) => {
-          if (c.id !== f.concepto_id) return c;
-          const nuevo = Math.max(0, c.monto_comprobado - f.monto_aplicado);
+          if (c.id !== conceptoId) return c;
+          const nuevo = Math.max(0, c.monto_comprobado - aplicado);
           return {
             ...c,
             // Si el renglón deja de estar completo, la validación de Compras ya no aplica.
@@ -292,7 +308,7 @@ function Comprobacion() {
         }),
       );
     }
-    toast.success("Factura eliminada.");
+    toast.success(g.length > 1 ? "Comprobante eliminado (XML y PDF)." : "Archivo eliminado.");
   };
 
   if (!sel)
@@ -385,25 +401,29 @@ function Comprobacion() {
   const botonesAdjuntar = (r: ComprobanteGasto) => {
     const cerrado = r.status_renglon === "comprobado" || r.status_renglon === "no_aplica";
     if (cerrado || !puedeComprobar) return <span className="text-xs text-muted-foreground">—</span>;
+    const esVales = r.concepto === "Vales";
     return (
-      <div className="flex gap-1">
-        <button
-          title={`Adjuntar XML para ${r.concepto}`}
-          onClick={() => onFile("XML", r)}
-          className="rounded p-1.5 hover:bg-secondary"
-          style={{ color: "var(--color-primary)" }}
-        >
-          <FileCode size={15} />
-        </button>
-        <button
-          title={`Adjuntar PDF para ${r.concepto}`}
-          onClick={() => onFile("PDF", r)}
-          className="rounded p-1.5 text-muted-foreground hover:bg-secondary"
-        >
-          <FileText size={15} />
-        </button>
-      </div>
+      <button
+        onClick={() => setAdjuntando(r)}
+        className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold hover:bg-secondary"
+        style={{ color: "var(--color-primary)", borderColor: "var(--color-primary)" }}
+        title={esVales ? "Adjuntar foto o PDF de los vales" : "Adjuntar XML y PDF"}
+        aria-label={`Adjuntar comprobante de ${r.concepto}`}
+      >
+        <Paperclip size={14} /> Adjuntar
+      </button>
     );
+  };
+  // Un comprobante = XML + PDF (par) o un archivo suelto (vales / heredado).
+  const grupos = agruparFacturas(fs);
+  const estadoGrupo = (g: Factura[]) => {
+    const concepto = comprobantes.find((c) => c.id === g[0].concepto_id)?.concepto ?? "";
+    if (g.some((f) => f.status === "Incompleto") || (g.length === 1 && concepto && conceptoRequierePar(concepto) && !g[0].par_id && g[0].status !== "Error")) {
+      const falta = g[0].tipo === "XML" ? "PDF" : "XML";
+      return { texto: `Incompleto · falta ${falta}`, bg: "#FEF3C7", fg: "#B45309" };
+    }
+    if (g.some((f) => f.status === "Error")) return { texto: "Error", bg: "#FEE9EA", fg: "#E30613" };
+    return { texto: "Verificado", bg: "#D8F3DC", fg: "#2D6A4F" };
   };
   const badgeRenglon = (r: ComprobanteGasto) => (
     <span
@@ -553,9 +573,9 @@ function Comprobacion() {
       <div className="ckl-card p-4">
         <div className="text-sm font-semibold">Validación de comprobantes</div>
         <p className="mt-1 text-xs text-muted-foreground">
-          Usa los íconos <FileCode size={11} className="inline" /> XML /{" "}
-          <FileText size={11} className="inline" /> PDF junto a cada concepto en la tabla de arriba
-          — así queda claro a qué renglón corresponde cada comprobante.
+          Presiona <b>Adjuntar</b> en el concepto y sube el <b>XML y el PDF juntos</b>: solo cuando
+          están los dos archivos el comprobante cuenta y suma a lo comprobado. Los <b>vales</b> se
+          comprueban con una sola foto o PDF (sin XML). La gasolina no se comprueba.
         </p>
         <div className="mt-3">
           <div className="mb-1 text-xs font-semibold text-muted-foreground">Log de validación</div>
@@ -575,51 +595,51 @@ function Comprobacion() {
         <div className="border-b p-4 text-sm font-semibold">Facturas cargadas</div>
         {/* Móvil (< 768 px): tarjetas apiladas en lugar de tabla de 8 columnas. */}
         <ul className="divide-y md:hidden">
-          {fs.length === 0 && (
+          {grupos.length === 0 && (
             <li className="p-6 text-center text-xs text-muted-foreground">Sin facturas</li>
           )}
-          {fs.map((f) => {
+          {grupos.map((g) => {
+            const f = g[0];
             const concepto = comprobantes.find((c) => c.id === f.concepto_id)?.concepto ?? "—";
+            const est = estadoGrupo(g);
             return (
               <li key={f.id} className="p-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="ckl-badge" style={{ background: "#F1F3F5", color: "#333" }}>
-                      {f.tipo}
-                    </span>
+                    {g.map((x) => (
+                      <span key={x.id} className="ckl-badge" style={{ background: "#F1F3F5", color: "#333" }}>
+                        {x.tipo}
+                      </span>
+                    ))}
                     <span className="text-sm font-medium">{concepto}</span>
                   </div>
-                  <span
-                    className="ckl-badge"
-                    style={{
-                      background: f.status === "Verificado" ? "#D8F3DC" : "#FEE9EA",
-                      color: f.status === "Verificado" ? "#2D6A4F" : "#E30613",
-                    }}
-                  >
-                    {f.status}
+                  <span className="ckl-badge" style={{ background: est.bg, color: est.fg }}>
+                    {est.texto}
                   </span>
                 </div>
-                <div className="mt-1 break-all text-xs">{f.archivo}</div>
-                <div className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">
-                  {f.uuid}
-                </div>
+                {g.map((x) => (
+                  <div key={x.id} className="mt-1 flex items-center justify-between gap-2">
+                    <span className="min-w-0 break-all text-xs">{x.archivo}</span>
+                    <span className="flex shrink-0 gap-0.5">
+                      <button title="Ver" aria-label={`Ver ${x.tipo}`} className="rounded p-2 hover:bg-secondary" onClick={() => verFactura(x)}>
+                        <Eye size={16} />
+                      </button>
+                      <button title="Descargar" aria-label={`Descargar ${x.tipo}`} className="rounded p-2 hover:bg-secondary" onClick={() => descargarFactura(x)}>
+                        <Download size={16} />
+                      </button>
+                    </span>
+                  </div>
+                ))}
+                <div className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{f.uuid}</div>
                 <div className="mt-1 flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">
                     {f.fecha} · <b className="text-foreground">{fmtMoney(f.total)}</b>
                   </span>
-                  <div className="flex gap-1">
-                    <button title="Ver" aria-label="Ver" className="rounded p-2 hover:bg-secondary" onClick={() => verFactura(f)}>
-                      <Eye size={16} />
+                  {puedeComprobar && (
+                    <button title="Eliminar" aria-label="Eliminar comprobante" className="rounded p-2 hover:bg-secondary" onClick={() => removeGrupo(g)}>
+                      <Trash2 size={16} />
                     </button>
-                    <button title="Descargar" aria-label="Descargar" className="rounded p-2 hover:bg-secondary" onClick={() => descargarFactura(f)}>
-                      <Download size={16} />
-                    </button>
-                    {puedeComprobar && (
-                      <button title="Eliminar" aria-label="Eliminar" className="rounded p-2 hover:bg-secondary" onClick={() => removeFactura(f.id)}>
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </div>
+                  )}
                 </div>
               </li>
             );
@@ -640,59 +660,62 @@ function Comprobacion() {
               </tr>
             </thead>
             <tbody>
-              {fs.length === 0 && (
+              {grupos.length === 0 && (
                 <tr>
                   <td colSpan={8} className="p-6 text-center text-xs text-muted-foreground">
                     Sin facturas
                   </td>
                 </tr>
               )}
-              {fs.map((f) => {
+              {grupos.map((g) => {
+                const f = g[0];
                 const concepto = comprobantes.find((c) => c.id === f.concepto_id)?.concepto ?? "—";
+                const est = estadoGrupo(g);
                 return (
-                  <tr key={f.id} className="border-t">
+                  <tr key={f.id} className="border-t align-top">
                     <td className="p-3">
-                      <span className="ckl-badge" style={{ background: "#F1F3F5", color: "#333" }}>
-                        {f.tipo}
-                      </span>
+                      <div className="flex flex-col items-start gap-1">
+                        {g.map((x) => (
+                          <span key={x.id} className="ckl-badge" style={{ background: "#F1F3F5", color: "#333" }}>
+                            {x.tipo}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td className="p-3 text-xs">{concepto}</td>
                     <td className="p-3 text-xs">{f.fecha}</td>
                     <td className="p-3 font-mono text-[11px]">{f.uuid}</td>
-                    <td className="p-3 text-xs">{f.archivo}</td>
+                    <td className="p-3 text-xs">
+                      {g.map((x) => (
+                        <div key={x.id} className="py-0.5">{x.archivo}</div>
+                      ))}
+                    </td>
                     <td className="p-3 text-right font-semibold">{fmtMoney(f.total)}</td>
                     <td className="p-3">
-                      <span
-                        className="ckl-badge"
-                        style={{
-                          background: f.status === "Verificado" ? "#D8F3DC" : "#FEE9EA",
-                          color: f.status === "Verificado" ? "#2D6A4F" : "#E30613",
-                        }}
-                      >
-                        {f.status}
+                      <span className="ckl-badge" style={{ background: est.bg, color: est.fg }}>
+                        {est.texto}
                       </span>
                     </td>
                     <td className="p-3">
-                      <div className="flex gap-1">
-                        <button
-                          title="Ver"
-                          className="rounded p-1 hover:bg-secondary"
-                          onClick={() => verFactura(f)}
-                        >
-                          <Eye size={14} />
-                        </button>
-                        <button
-                          title="Descargar"
-                          className="rounded p-1 hover:bg-secondary"
-                          onClick={() => descargarFactura(f)}
-                        >
-                          <Download size={14} />
-                        </button>
+                      <div className="flex items-start gap-2">
+                        <div className="space-y-0.5">
+                          {g.map((x) => (
+                            <div key={x.id} className="flex items-center gap-0.5">
+                              <button title="Ver" aria-label={`Ver ${x.tipo}`} className="rounded p-1 hover:bg-secondary" onClick={() => verFactura(x)}>
+                                <Eye size={14} />
+                              </button>
+                              <button title="Descargar" aria-label={`Descargar ${x.tipo}`} className="rounded p-1 hover:bg-secondary" onClick={() => descargarFactura(x)}>
+                                <Download size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                         {puedeComprobar && (
                           <button
                             title="Eliminar"
+                            aria-label="Eliminar comprobante"
                             className="rounded p-1 hover:bg-secondary"
-                            onClick={() => removeFactura(f.id)}
+                            onClick={() => removeGrupo(g)}
                           >
                             <Trash2 size={14} />
                           </button>
@@ -741,6 +764,13 @@ function Comprobacion() {
         </div>
       )}
       </div>
+      {adjuntando && (
+        <SubirComprobanteDialog
+          renglon={adjuntando}
+          onClose={() => setAdjuntando(null)}
+          onSubir={(a) => subirComprobante(adjuntando, a)}
+        />
+      )}
     </div>
   );
 }

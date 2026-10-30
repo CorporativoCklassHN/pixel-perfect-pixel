@@ -2,7 +2,7 @@ import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, FilePlus2, ListChecks, ReceiptText, BarChart3,
-  Users, ShieldCheck, Settings, Menu, Plus, X,
+  Users, ShieldCheck, Settings, Menu, Plus, X, Handshake,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -46,6 +46,7 @@ export function PortalLayout() {
     { to: "/estatus", label: "Estatus", icon: ListChecks, section: "Viáticos", badge: abiertos },
     { to: "/comprobacion", label: "Comprobación", icon: ReceiptText, section: "Viáticos", perm: "comprobar" },
     { to: "/reportes", label: "Reportes", icon: BarChart3, section: "Viáticos", perm: "ver_reportes" },
+    { to: "/convenios", label: "Convenios", icon: Handshake, section: "Administración", perm: "gestionar_convenios" },
     { to: "/usuarios", label: "Usuarios", icon: Users, section: "Administración" },
     { to: "/permisos", label: "Permisos", icon: ShieldCheck, section: "Administración", perm: "configurar_permisos" },
     { to: "/configuracion", label: "Configuración", icon: Settings, section: "Administración", perm: "configurar_montos" },

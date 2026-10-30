@@ -193,6 +193,7 @@ function RevisionDialog({ rev, onClose }: { rev: RevisionMontoManual; onClose: (
         <div className="divide-y rounded-lg border px-4">
           {fila("Folio", rev.folio, true)}
           {fila("Destino", rev.destino_estado)}
+          {fila("Habitación", rev.tipo_habitacion === "doble" ? "Doble" : "Sencilla")}
           {fila("Estancia", `${dmy(rev.fecha_inicio)} → ${dmy(rev.fecha_fin)} (${rev.noches} noche(s))`)}
           {fila(
             "Monto predeterminado (por noche)",
@@ -214,6 +215,11 @@ function RevisionDialog({ rev, onClose }: { rev: RevisionMontoManual; onClose: (
             )}
           {tieneDefault &&
             fila("Total estancia", `${fmtMoney(totalDefault)} → ${fmtMoney(totalManual)}`, true)}
+        </div>
+
+        <div className="rounded-md bg-secondary p-3 text-sm">
+          <div className="text-xs font-semibold text-muted-foreground">Motivo del usuario</div>
+          <div className="mt-0.5">{rev.motivo ? rev.motivo : "Sin motivo capturado."}</div>
         </div>
 
         {rev.estado === "pendiente" ? (

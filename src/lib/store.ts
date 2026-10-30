@@ -38,7 +38,27 @@ export type Hotel = {
   estado: string;
   tarifa_base: number;
   activo: boolean;
+  // Tarifa por noche en habitación doble (si el hotel ofrece los dos tipos). La de
+  // habitación sencilla es `tarifa_base`.
+  tarifa_doble?: number | null;
+  // Presente cuando el hotel lo mantiene un convenio (ver sincronizarCatalogoConvenios).
+  convenio_clave?: string;
 };
+
+export type TipoHabitacion = "sencilla" | "doble";
+
+// Tarifa predeterminada por noche de un hotel según el tipo de habitación elegido.
+export function tarifaHotel(h: Pick<Hotel, "tarifa_base" | "tarifa_doble"> | undefined, tipo: TipoHabitacion = "sencilla") {
+  if (!h) return 0;
+  return tipo === "doble" && h.tarifa_doble && h.tarifa_doble > 0 ? h.tarifa_doble : h.tarifa_base;
+}
+
+// Precio con centavos solo cuando los tiene (tarifas de convenio como $737.50).
+export function fmtTarifa(n: number) {
+  return Number.isInteger(n)
+    ? fmtMoney(n)
+    : "$" + n.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 export type Solicitud = {
   id: string;
@@ -138,6 +158,7 @@ export const KEYS = {
   resetCodes: "ckl_reset_codes",
   session: "ckl_session",
   revisionesMonto: "ckl_revisiones_monto",
+  convenios: "ckl_convenios",
   correos: "ckl_correos",
   logs: "ckl_logs",
 } as const;
@@ -209,6 +230,8 @@ const SEED_ROLES: Role[] = [
       validar_comprobacion: true,
       // Acepta o rechaza los montos manuales de hotel (campanita + correo informativo).
       revisar_monto_manual: true,
+      // Alta, baja y modificación de convenios con hoteles.
+      gestionar_convenios: true,
       solicitar: true, ver_propio: true, comprobar: false,
       ver_equipo: false, ver_todo: true,
       autorizar_lte5000: false, autorizar_gt5000: true,
@@ -321,12 +344,12 @@ const SEED_COMPROBANTES: ComprobanteGasto[] = [
   { id: "cg2", solicitud_id: "s2", concepto: "Transporte foráneo", monto_solicitado: 1800, monto_comprobado: 1800, status_renglon: "comprobado" },
   { id: "cg3", solicitud_id: "s2", concepto: "Transporte local", monto_solicitado: 400, monto_comprobado: 200, status_renglon: "parcialmente_comprobado" },
   { id: "cg4", solicitud_id: "s2", concepto: "Comida", monto_solicitado: 900, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cg5", solicitud_id: "s2", concepto: "Otros", monto_solicitado: 500, monto_comprobado: 500, status_renglon: "comprobado" },
+  { id: "cg5", solicitud_id: "s2", concepto: "Vales", monto_solicitado: 500, monto_comprobado: 500, status_renglon: "comprobado" },
   { id: "cg6", solicitud_id: "s10", concepto: "Hotel", monto_solicitado: 1600, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cg7", solicitud_id: "s10", concepto: "Transporte foráneo", monto_solicitado: 1400, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cg8", solicitud_id: "s10", concepto: "Transporte local", monto_solicitado: 300, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cg9", solicitud_id: "s10", concepto: "Comida", monto_solicitado: 900, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cg10", solicitud_id: "s10", concepto: "Otros", monto_solicitado: 300, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cg10", solicitud_id: "s10", concepto: "Vales", monto_solicitado: 300, monto_comprobado: 0, status_renglon: "pendiente" },
 ];
 
 // Desglose (hoteles, transportes, otros conceptos) por destino de cada
@@ -493,83 +516,83 @@ const SEED_COMPROBANTES_DETALLE: ComprobanteGasto[] = [
   { id: "cgd_s1_2", solicitud_id: "s1", concepto: "Transporte foráneo", monto_solicitado: 2254, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s1_3", solicitud_id: "s1", concepto: "Transporte local", monto_solicitado: 773, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s1_4", solicitud_id: "s1", concepto: "Comida", monto_solicitado: 1610, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s1_5", solicitud_id: "s1", concepto: "Otros", monto_solicitado: 313, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s1_5", solicitud_id: "s1", concepto: "Vales", monto_solicitado: 313, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s3_1", solicitud_id: "s3", concepto: "Hotel", monto_solicitado: 1200, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s3_2", solicitud_id: "s3", concepto: "Transporte foráneo", monto_solicitado: 500, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s3_3", solicitud_id: "s3", concepto: "Transporte local", monto_solicitado: 200, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s3_4", solicitud_id: "s3", concepto: "Comida", monto_solicitado: 500, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s3_5", solicitud_id: "s3", concepto: "Otros", monto_solicitado: 100, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s3_5", solicitud_id: "s3", concepto: "Vales", monto_solicitado: 100, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s4_1", solicitud_id: "s4", concepto: "Hotel", monto_solicitado: 3560, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s4_2", solicitud_id: "s4", concepto: "Transporte foráneo", monto_solicitado: 2800, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s4_3", solicitud_id: "s4", concepto: "Transporte local", monto_solicitado: 960, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s4_4", solicitud_id: "s4", concepto: "Comida", monto_solicitado: 2000, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s4_5", solicitud_id: "s4", concepto: "Otros", monto_solicitado: 680, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s4_5", solicitud_id: "s4", concepto: "Vales", monto_solicitado: 680, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s5_1", solicitud_id: "s5", concepto: "Hotel", monto_solicitado: 1900, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s5_2", solicitud_id: "s5", concepto: "Transporte foráneo", monto_solicitado: 1344, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s5_3", solicitud_id: "s5", concepto: "Transporte local", monto_solicitado: 461, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s5_4", solicitud_id: "s5", concepto: "Comida", monto_solicitado: 960, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s5_5", solicitud_id: "s5", concepto: "Otros", monto_solicitado: 135, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s5_5", solicitud_id: "s5", concepto: "Vales", monto_solicitado: 135, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s6_1", solicitud_id: "s6", concepto: "Hotel", monto_solicitado: 760, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s6_2", solicitud_id: "s6", concepto: "Transporte foráneo", monto_solicitado: 868, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s6_3", solicitud_id: "s6", concepto: "Transporte local", monto_solicitado: 298, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s6_4", solicitud_id: "s6", concepto: "Comida", monto_solicitado: 620, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s6_5", solicitud_id: "s6", concepto: "Otros", monto_solicitado: 554, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s6_5", solicitud_id: "s6", concepto: "Vales", monto_solicitado: 554, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s7_1", solicitud_id: "s7", concepto: "Hotel", monto_solicitado: 2850, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s7_2", solicitud_id: "s7", concepto: "Transporte foráneo", monto_solicitado: 2016, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s7_3", solicitud_id: "s7", concepto: "Transporte local", monto_solicitado: 691, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s7_4", solicitud_id: "s7", concepto: "Comida", monto_solicitado: 1440, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s7_5", solicitud_id: "s7", concepto: "Otros", monto_solicitado: 203, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s7_5", solicitud_id: "s7", concepto: "Vales", monto_solicitado: 203, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s8_1", solicitud_id: "s8", concepto: "Hotel", monto_solicitado: 1100, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s8_2", solicitud_id: "s8", concepto: "Transporte foráneo", monto_solicitado: 896, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s8_3", solicitud_id: "s8", concepto: "Transporte local", monto_solicitado: 307, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s8_4", solicitud_id: "s8", concepto: "Comida", monto_solicitado: 640, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s8_5", solicitud_id: "s8", concepto: "Otros", monto_solicitado: 257, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s8_5", solicitud_id: "s8", concepto: "Vales", monto_solicitado: 257, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s9_1", solicitud_id: "s9", concepto: "Hotel", monto_solicitado: 2200, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s9_2", solicitud_id: "s9", concepto: "Transporte foráneo", monto_solicitado: 1708, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s9_3", solicitud_id: "s9", concepto: "Transporte local", monto_solicitado: 586, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s9_4", solicitud_id: "s9", concepto: "Comida", monto_solicitado: 1220, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s9_5", solicitud_id: "s9", concepto: "Otros", monto_solicitado: 386, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s9_5", solicitud_id: "s9", concepto: "Vales", monto_solicitado: 386, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s11_1", solicitud_id: "s11", concepto: "Hotel", monto_solicitado: 550, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s11_2", solicitud_id: "s11", concepto: "Transporte foráneo", monto_solicitado: 588, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s11_3", solicitud_id: "s11", concepto: "Transporte local", monto_solicitado: 202, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s11_4", solicitud_id: "s11", concepto: "Comida", monto_solicitado: 420, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s11_5", solicitud_id: "s11", concepto: "Otros", monto_solicitado: 340, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s11_5", solicitud_id: "s11", concepto: "Vales", monto_solicitado: 340, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s12_1", solicitud_id: "s12", concepto: "Hotel", monto_solicitado: 2670, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s12_2", solicitud_id: "s12", concepto: "Transporte foráneo", monto_solicitado: 1792, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s12_3", solicitud_id: "s12", concepto: "Transporte local", monto_solicitado: 614, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s12_4", solicitud_id: "s12", concepto: "Comida", monto_solicitado: 1280, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s12_5", solicitud_id: "s12", concepto: "Otros", monto_solicitado: 44, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s12_5", solicitud_id: "s12", concepto: "Vales", monto_solicitado: 44, monto_comprobado: 0, status_renglon: "pendiente" },
   // s13 (#0048) ya fue comprobada por completo.
   { id: "cgd_s13_1", solicitud_id: "s13", concepto: "Hotel", monto_solicitado: 1100, monto_comprobado: 1100, status_renglon: "comprobado" },
   { id: "cgd_s13_2", solicitud_id: "s13", concepto: "Transporte foráneo", monto_solicitado: 1176, monto_comprobado: 1176, status_renglon: "comprobado" },
   { id: "cgd_s13_3", solicitud_id: "s13", concepto: "Transporte local", monto_solicitado: 403, monto_comprobado: 403, status_renglon: "comprobado" },
   { id: "cgd_s13_4", solicitud_id: "s13", concepto: "Comida", monto_solicitado: 840, monto_comprobado: 840, status_renglon: "comprobado" },
-  { id: "cgd_s13_5", solicitud_id: "s13", concepto: "Otros", monto_solicitado: 681, monto_comprobado: 681, status_renglon: "comprobado" },
+  { id: "cgd_s13_5", solicitud_id: "s13", concepto: "Vales", monto_solicitado: 681, monto_comprobado: 681, status_renglon: "comprobado" },
   { id: "cgd_s14_1", solicitud_id: "s14", concepto: "Hotel", monto_solicitado: 1900, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s14_2", solicitud_id: "s14", concepto: "Transporte foráneo", monto_solicitado: 1624, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s14_3", solicitud_id: "s14", concepto: "Transporte local", monto_solicitado: 557, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s14_4", solicitud_id: "s14", concepto: "Comida", monto_solicitado: 1160, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s14_5", solicitud_id: "s14", concepto: "Otros", monto_solicitado: 559, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s14_5", solicitud_id: "s14", concepto: "Vales", monto_solicitado: 559, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s15_1", solicitud_id: "s15", concepto: "Hotel", monto_solicitado: 870, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s15_2", solicitud_id: "s15", concepto: "Transporte foráneo", monto_solicitado: 868, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s15_3", solicitud_id: "s15", concepto: "Transporte local", monto_solicitado: 298, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s15_4", solicitud_id: "s15", concepto: "Comida", monto_solicitado: 620, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s15_5", solicitud_id: "s15", concepto: "Otros", monto_solicitado: 444, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s15_5", solicitud_id: "s15", concepto: "Vales", monto_solicitado: 444, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s16_1", solicitud_id: "s16", concepto: "Hotel", monto_solicitado: 1780, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s16_2", solicitud_id: "s16", concepto: "Transporte foráneo", monto_solicitado: 1288, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s16_3", solicitud_id: "s16", concepto: "Transporte local", monto_solicitado: 442, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s16_4", solicitud_id: "s16", concepto: "Comida", monto_solicitado: 920, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s16_5", solicitud_id: "s16", concepto: "Otros", monto_solicitado: 170, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s16_5", solicitud_id: "s16", concepto: "Vales", monto_solicitado: 170, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s17_1", solicitud_id: "s17", concepto: "Hotel", monto_solicitado: 2300, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s17_2", solicitud_id: "s17", concepto: "Transporte foráneo", monto_solicitado: 1904, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s17_3", solicitud_id: "s17", concepto: "Transporte local", monto_solicitado: 653, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s17_4", solicitud_id: "s17", concepto: "Comida", monto_solicitado: 1360, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s17_5", solicitud_id: "s17", concepto: "Otros", monto_solicitado: 583, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s17_5", solicitud_id: "s17", concepto: "Vales", monto_solicitado: 583, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s18_1", solicitud_id: "s18", concepto: "Hotel", monto_solicitado: 1360, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s18_2", solicitud_id: "s18", concepto: "Transporte foráneo", monto_solicitado: 1092, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s18_3", solicitud_id: "s18", concepto: "Transporte local", monto_solicitado: 374, monto_comprobado: 0, status_renglon: "pendiente" },
   { id: "cgd_s18_4", solicitud_id: "s18", concepto: "Comida", monto_solicitado: 780, monto_comprobado: 0, status_renglon: "pendiente" },
-  { id: "cgd_s18_5", solicitud_id: "s18", concepto: "Otros", monto_solicitado: 294, monto_comprobado: 0, status_renglon: "pendiente" },
+  { id: "cgd_s18_5", solicitud_id: "s18", concepto: "Vales", monto_solicitado: 294, monto_comprobado: 0, status_renglon: "pendiente" },
 ];
 
 const SEED_CONFIG = {
@@ -616,6 +639,7 @@ export function initSeed() {
     [KEYS.comprobantesViaje, []],
     [KEYS.facturasXml, []],
     [KEYS.revisionesMonto, []],
+    [KEYS.convenios, SEED_CONVENIOS],
     [KEYS.correos, []],
     [KEYS.logs, []],
   ];
@@ -632,11 +656,16 @@ export function initSeed() {
   backfillEscenariosComprobacion();
   backfillValidarComprobacion();
   backfillRevisarMontoManual();
+  backfillGestionarConvenios();
   backfillEscenariosValidacion();
   backfillEscenariosMontoManual();
   backfillFolioCollisions();
   backfillGestorVuelosComprobar();
+  backfillValesConcepto();
+  backfillSinGasolina();
+  backfillParesComprobante();
   backfillDesgloseTransportePorTipo();
+  backfillConveniosCatalogo();
 }
 
 // Gestor de vuelos gana acceso a Comprobación (antes comprobar: false) — la
@@ -691,7 +720,7 @@ function backfillDesgloseTransportePorTipo() {
   }
 
   const comprobantes = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
-  const NO_TRANSPORTE = new Set(["Hotel", "Comida", "Otros"]);
+  const NO_TRANSPORTE = new Set(["Hotel", "Comida", "Otros", "Vales", "Gasolina", "Caseta"]);
   const reconstruidas = new Set<string>();
   let changed = false;
   const resultado: ComprobanteGasto[] = [];
@@ -1394,7 +1423,7 @@ function backfillEscenariosValidacion() {
       { concepto: e.foraneo.tipo, monto: e.foraneo.monto, tipo: "XML", emisor: e.foraneo.emisor, emisorRfc: e.foraneo.emisorRfc },
       { concepto: e.local.tipo, monto: e.local.monto, tipo: "PDF", emisor: e.local.emisor, emisorRfc: "" },
       { concepto: "Comida", monto: comida, tipo: "XML", emisor: "Restaurantes del Centro", emisorRfc: "RCE010101MN7" },
-      { concepto: "Otros", monto: e.otros.monto, tipo: "PDF", emisor: e.otros.concepto, emisorRfc: "" },
+      { concepto: "Vales", monto: e.otros.monto, tipo: "PDF", emisor: e.otros.concepto, emisorRfc: "" },
     ];
     renglones.forEach((r, i) => {
       const cgId = `cgv_${e.id}_${i + 1}`;
@@ -1417,29 +1446,41 @@ function backfillEscenariosValidacion() {
       const uuid = `${e.id}${i + 1}A7C1-4B2E-4F1A-9D3C-${String(100000 + i * 37)}ABCDEF`
         .toUpperCase()
         .slice(0, 36);
-      const archivo =
-        r.tipo === "XML"
-          ? `${e.id}_${r.concepto.toLowerCase()}_factura.xml`
-          : `${e.id}_${r.concepto.toLowerCase()}_comprobante.pdf`;
-      const ascii = (t: string) => t.replace(/[^\x20-\x7E]/g, "");
-      const contenido =
-        r.tipo === "XML"
-          ? fakeXmlDataUrl({
-              emisor: r.emisor, emisorRfc: r.emisorRfc,
-              receptor: e.empresa, receptorRfc: sociedad?.rfc ?? "XAXX010101000",
-              total: r.monto, uuid, fecha: e.fin, concepto: r.concepto,
-            })
-          : fakePdfDataUrl([
-              ascii(`Comprobante de ${r.concepto}`),
-              ascii(`Emisor: ${r.emisor}`),
-              `Folio: ${folio}  Importe: $${r.monto}.00 MXN`,
-              `Fecha: ${dmy(e.fin)}`,
-            ]);
-      nuevasFact.push({
-        id: `fv_${e.id}_${i + 1}`, solicitud_id: e.id, tipo: r.tipo, fecha: dmy(e.fin),
-        uuid, archivo, total: r.monto, status: "Verificado",
-        concepto_id: cgId, monto_aplicado: r.monto, contenido,
-      });
+      const ascii = (t: string) => t.replace(/[^ -~]/g, "");
+      const lineasPdf = [
+        ascii(`Comprobante de ${r.concepto}`),
+        ascii(`Emisor: ${r.emisor}`),
+        `Folio: ${folio}  Importe: $${r.monto}.00 MXN`,
+        `Fecha: ${dmy(e.fin)}`,
+      ];
+      const slug = r.concepto.toLowerCase();
+      const base = {
+        solicitud_id: e.id, fecha: dmy(e.fin), uuid, total: r.monto,
+        status: "Verificado" as const, concepto_id: cgId,
+      };
+      if (r.concepto === "Vales") {
+        // Vales: un solo archivo (foto o PDF), sin XML
+        nuevasFact.push({
+          ...base, id: `fv_${e.id}_${i + 1}`, tipo: "PDF", archivo: `${e.id}_${slug}_comprobante.pdf`,
+          monto_aplicado: r.monto, contenido: fakePdfDataUrl(lineasPdf),
+        });
+      } else {
+        // Resto de conceptos: par XML + PDF (el XML aplica el monto)
+        const parId = `par_fv_${e.id}_${i + 1}`;
+        nuevasFact.push({
+          ...base, id: `fv_${e.id}_${i + 1}`, tipo: "XML", archivo: `${e.id}_${slug}_factura.xml`,
+          monto_aplicado: r.monto, par_id: parId,
+          contenido: fakeXmlDataUrl({
+            emisor: r.emisor, emisorRfc: r.emisorRfc || "XAXX010101000",
+            receptor: e.empresa, receptorRfc: sociedad?.rfc ?? "XAXX010101000",
+            total: r.monto, uuid, fecha: e.fin, concepto: r.concepto,
+          }),
+        });
+        nuevasFact.push({
+          ...base, id: `fv_${e.id}_${i + 1}p`, tipo: "PDF", archivo: `${e.id}_${slug}_factura.pdf`,
+          monto_aplicado: 0, par_id: parId, contenido: fakePdfDataUrl(lineasPdf),
+        });
+      }
     });
   }
 
@@ -1465,8 +1506,10 @@ export type RevisionMontoManual = {
   hotel_stay_id: string;
   hotel_id: number; // 0 = sin hotel de catálogo
   hotel_nombre: string;
+  tipo_habitacion?: TipoHabitacion; // ausente = sencilla
   tarifa_default: number; // por noche, del catálogo (0 si no hay hotel de catálogo)
   monto_manual: number; // por noche, el que capturó el usuario
+  motivo?: string; // por qué el usuario cambió el monto
   noches: number;
   fecha_inicio: string;
   fecha_fin: string;
@@ -1583,6 +1626,8 @@ type DestinoMonto = {
     monto: number;
     manual: boolean;
     hotel_id?: number;
+    motivo_cambio?: string;
+    tipo_habitacion?: TipoHabitacion;
   }[];
 };
 
@@ -1597,12 +1642,13 @@ function cuerpoCorreoMonto(r: RevisionMontoManual, solicitante: string) {
   return [
     `${solicitante} guardó la solicitud ${r.folio} con un hotel a un monto distinto al predeterminado.`,
     "",
-    `Hotel: ${r.hotel_nombre} (${r.destino_estado})`,
+    `Hotel: ${r.hotel_nombre} (${r.destino_estado}) · Habitación ${r.tipo_habitacion === "doble" ? "doble" : "sencilla"}`,
     `Fechas: ${r.fecha_inicio} al ${r.fecha_fin} (${r.noches} noche(s))`,
     r.tarifa_default > 0
       ? `Monto predeterminado por noche: $${r.tarifa_default.toLocaleString("es-MX")}`
       : "Monto predeterminado: sin hotel de catálogo",
     `Monto manual por noche: $${r.monto_manual.toLocaleString("es-MX")}`,
+    r.motivo ? `Motivo del usuario: ${r.motivo}` : "",
     r.tarifa_default > 0
       ? `Diferencia por noche: ${dif >= 0 ? "+" : "-"}$${Math.abs(dif).toLocaleString("es-MX")}`
       : "",
@@ -1637,19 +1683,26 @@ export function crearRevisionesMontoManual(
   const conservadas: RevisionMontoManual[] = [];
   // Resueltas que siguen aplicando a la solicitud tal como quedó (mismo hotel y monto).
   const resueltasVigentes: string[] = [];
+  let cambioMotivo = false;
   for (const d of destinos) {
     for (const h of d.hoteles) {
       if (!h.manual || !(Number(h.monto) > 0)) continue;
       const cat = hoteles.find((x) => x.id === h.hotel_id);
-      const tarifa = cat?.tarifa_base ?? 0;
+      const tipo: TipoHabitacion = h.tipo_habitacion === "doble" ? "doble" : "sencilla";
+      const tarifa = tarifaHotel(cat, tipo);
       // Igual al predeterminado: no hay cambio que revisar.
       if (cat && Number(h.monto) === tarifa) continue;
       const hotelId = h.hotel_id ?? 0;
       const igual = (r: RevisionMontoManual) =>
-        r.hotel_stay_id === h.id && r.hotel_id === hotelId && r.monto_manual === Number(h.monto);
+        r.hotel_stay_id === h.id &&
+        r.hotel_id === hotelId &&
+        r.monto_manual === Number(h.monto) &&
+        (r.tipo_habitacion ?? "sencilla") === tipo;
       const previa = previasPendientes.find(igual);
       if (previa) {
-        conservadas.push(previa);
+        const motivo = h.motivo_cambio?.trim() || undefined;
+        if (previa.motivo !== motivo) cambioMotivo = true;
+        conservadas.push({ ...previa, motivo });
         continue;
       }
       const previaResuelta = resueltas.find(igual);
@@ -1666,8 +1719,10 @@ export function crearRevisionesMontoManual(
         hotel_stay_id: h.id,
         hotel_id: hotelId,
         hotel_nombre: cat?.nombre ?? "Hotel fuera de catálogo",
+        tipo_habitacion: tipo,
         tarifa_default: tarifa,
         monto_manual: Number(h.monto),
+        motivo: h.motivo_cambio?.trim() || undefined,
         noches: nochesEntreIso(h.fecha_inicio, h.fecha_fin),
         fecha_inicio: h.fecha_inicio,
         fecha_fin: h.fecha_fin,
@@ -1693,7 +1748,10 @@ export function crearRevisionesMontoManual(
   });
   // Hubo cambio si se descartaron pendientes anteriores, hay revisiones nuevas o cambió la vigencia.
   const cambioPendientes =
-    existentes.length !== resto.length + conservadas.length || nuevas.length > 0 || cambioVigencia;
+    existentes.length !== resto.length + conservadas.length ||
+    nuevas.length > 0 ||
+    cambioVigencia ||
+    cambioMotivo;
   if (cambioPendientes) {
     lsSet(KEYS.revisionesMonto, [...nuevas, ...conservadas, ...restoActualizado]);
   }
@@ -1937,7 +1995,7 @@ function backfillEscenariosMontoManual() {
       { concepto: e.foraneo.tipo, monto: e.foraneo.monto },
       { concepto: e.local.tipo, monto: e.local.monto },
       { concepto: "Comida", monto: comida },
-      { concepto: "Otros", monto: 0 },
+      { concepto: "Vales", monto: 0 },
     ].forEach((r, i) =>
       nuevosCg.push({
         id: `cgm_${e.id}_${i + 1}`, solicitud_id: e.id, concepto: r.concepto,
@@ -1964,4 +2022,343 @@ function backfillEscenariosMontoManual() {
       }
     }
   }
+}
+
+// ───────── Convenios con hoteles (Compras Corporativas) ─────────
+// Altas, bajas y modificaciones de los convenios con hoteles. La "baja" es lógica
+// (activo: false, con motivo y fecha) para conservar el historial; cada movimiento
+// queda en la bitácora (ckl_logs → futura tabla `logs`).
+export type Convenio = {
+  id: string;
+  anio: number;
+  tipo_sucursal: string;
+  no_sucursal: string;
+  destino: string; // ciudad
+  estado: string; // estado de la República (con el que Solicitar ubica el hotel)
+  nombre_comercial: string;
+  costo_sencilla: number; // por noche
+  costo_doble: number | null; // por noche (opcional)
+  no_proveedor: string;
+  razon_social: string;
+  telefono: string;
+  contacto: string;
+  banco: string;
+  correo: string;
+  notas: string;
+  activo: boolean;
+  baja_motivo?: string;
+  baja_fecha?: string; // ISO
+  creado_at: string; // ISO
+  actualizado_at: string; // ISO
+};
+
+// Estado de cada destino de los convenios de ejemplo.
+const ESTADO_POR_DESTINO: Record<string, string> = {
+  "Mérida": "Yucatán",
+  Tapachula: "Chiapas",
+  Monterrey: "Nuevo León",
+  "Mex Iztapalapa": "CDMX",
+  Villahermosa: "Tabasco",
+  "Torreón": "Coahuila",
+  Saltillo: "Coahuila",
+};
+
+const cv = (
+  n: number,
+  c: Omit<Convenio, "id" | "anio" | "tipo_sucursal" | "activo" | "creado_at" | "actualizado_at" | "estado">,
+  extra: Partial<Convenio> = {},
+): Convenio => ({
+  id: `cv${n}`,
+  anio: 2025,
+  tipo_sucursal: "Center",
+  estado: ESTADO_POR_DESTINO[c.destino] ?? "",
+  activo: true,
+  creado_at: "2025-01-15T10:00:00.000Z",
+  actualizado_at: "2025-01-15T10:00:00.000Z",
+  ...c,
+  ...extra,
+});
+
+export const SEED_CONVENIOS: Convenio[] = [
+  cv(1, { no_sucursal: "Suc031", destino: "Mérida", nombre_comercial: "Hotel Gran Centenario", costo_sencilla: 650, costo_doble: null, no_proveedor: "402884", razon_social: "Grupo Cosumaver S.A. de C.V.", telefono: "9999235478", contacto: "Itzel Rodriguez", banco: "", correo: "", notas: "" }),
+  cv(2, { no_sucursal: "Suc031", destino: "Mérida", nombre_comercial: "Hotel Casa Palomino", costo_sencilla: 695, costo_doble: 895, no_proveedor: "403124", razon_social: "Leonardo Palomino Perez", telefono: "999 920 0781", contacto: "Leonardo Perez / Gabriela", banco: "Santander", correo: "", notas: "" }),
+  cv(3, { no_sucursal: "Suc032", destino: "Tapachula", nombre_comercial: "Hotel Tapachula", costo_sencilla: 737.5, costo_doble: null, no_proveedor: "402904", razon_social: "Administradora Turistica Cecares, S.A. de C.V.", telefono: "962 62 66060 al 64", contacto: "Angeles Castillo", banco: "", correo: "", notas: "855.5 con desayuno incluido" }),
+  cv(4, { no_sucursal: "Suc032", destino: "Tapachula", nombre_comercial: "Hotel One Tapachula", costo_sencilla: 1350, costo_doble: 1350, no_proveedor: "403957", razon_social: "Corporacion Hotelera Izapa, SA de CV", telefono: "", contacto: "", banco: "", correo: "", notas: "Convenio CUS070880" }),
+  cv(5, { no_sucursal: "Suc032", destino: "Tapachula", nombre_comercial: "Hotel City Express by Marriott", costo_sencilla: 708, costo_doble: null, no_proveedor: "402999", razon_social: "Servicios Centrales de Cobranza Hotelera S.A. de C.V.", telefono: "9621175260", contacto: "Mayra Salgado / Melisa Vargas", banco: "", correo: "", notas: "Referencia: DCETAP5" }),
+  cv(6, { no_sucursal: "Suc033", destino: "Monterrey", nombre_comercial: "Hotel SAFI", costo_sencilla: 1428, costo_doble: 1606.5, no_proveedor: "402985", razon_social: "Desarrollo Optima, S.A. de C.V.", telefono: "81 8399 7000", contacto: "Beatriz Pizarro", banco: "", correo: "", notas: "De lunes a viernes 1200 + impuestos y fin de semana 1150 más impuestos" }),
+  cv(7, { no_sucursal: "Suc033", destino: "Monterrey", nombre_comercial: "Hotel iSTAY Centro", costo_sencilla: 1184.05, costo_doble: null, no_proveedor: "403501", razon_social: "Operadora de Hoteles Istay Monterrey Centro S. de R.L. de C.V.", telefono: "81 8228 6000", contacto: "Jesica Castillo / Angel / Daniela Gamboa", banco: "", correo: "", notas: "" }),
+  cv(8, { no_sucursal: "Suc034", destino: "Mex Iztapalapa", nombre_comercial: "Hotel Atenas Plaza", costo_sencilla: 650, costo_doble: 850, no_proveedor: "400017", razon_social: "Hotel Atenas Plaza, S.A. de C.V.", telefono: "55 56 70 18 05", contacto: "Recepción Jorge / Erika", banco: "", correo: "", notas: "Hablar directo al hotel para que sea válida la tarifa convenio 2025" }),
+  cv(9, { no_sucursal: "Suc035", destino: "Villahermosa", nombre_comercial: "Hotel City Express Jr By Marriott", costo_sencilla: 743.4, costo_doble: null, no_proveedor: "402999", razon_social: "Servicios Centrales de Cobranza Hotelera S.A. de C.V.", telefono: "993 310 4351", contacto: "Erika Valenzuela", banco: "", correo: "", notas: "Convenio CIE: Referencia DCJVSA8" }),
+  cv(10, { no_sucursal: "Suc035", destino: "Villahermosa", nombre_comercial: "Hotel Maya Tabasco", costo_sencilla: 770, costo_doble: null, no_proveedor: "403226", razon_social: "Concesionaria Turistica Villatab S. A. de C.V.", telefono: "993 358 1111", contacto: "Jaqueline Zacarias", banco: "", correo: "", notas: "" }),
+  // Dado de baja (escenario de ejemplo para el filtro "Baja" y el historial)
+  cv(11, { no_sucursal: "Suc035", destino: "Villahermosa", nombre_comercial: "Tabasco Inn", costo_sencilla: 735, costo_doble: null, no_proveedor: "402938", razon_social: "Tabasco Inn S.A. de C.V.", telefono: "312 26 80", contacto: "Julio Prado", banco: "", correo: "", notas: "" }, { activo: false, baja_motivo: "Hotel cerrado temporalmente por remodelación.", baja_fecha: "2025-09-30T12:00:00.000Z", actualizado_at: "2025-09-30T12:00:00.000Z" }),
+  cv(12, { no_sucursal: "Suc036", destino: "Torreón", nombre_comercial: "Hotel Nuve", costo_sencilla: 850, costo_doble: 850, no_proveedor: "402919", razon_social: "Grupo Nuve Hoteles, S.A. de C.V.", telefono: "871 717 4595", contacto: "Abraham / Pamela / Mariana", banco: "", correo: "nuvehoteltorreon@gmail.com", notas: "" }),
+  cv(13, { no_sucursal: "Suc036", destino: "Torreón", nombre_comercial: "Savoy Express", costo_sencilla: 815, costo_doble: 995, no_proveedor: "403079", razon_social: "Savoy Express S.A. de C.V.", telefono: "871 711 3030", contacto: "Gabriela Rios / Hector Hernandez", banco: "Banamex", correo: "", notas: "" }),
+  cv(14, { no_sucursal: "Suc037", destino: "Saltillo", nombre_comercial: "Hotel Colonial San Miguel", costo_sencilla: 950, costo_doble: null, no_proveedor: "402970", razon_social: "Carmen Del Rosario Herrera Ruiz", telefono: "844 410 3044", contacto: "Gerardo / Elisa / Griselda / Claudia", banco: "", correo: "", notas: "Mejoraron tarifa en el mes de enero: 760 por noche" }),
+];
+
+// Compras (compras_corporativas y roles creados a mano que empiezan con "compras")
+// recibe el permiso de gestionar convenios si aún no tiene la clave; no se pisa lo que
+// el admin ya haya fijado en Permisos.
+function backfillGestionarConvenios() {
+  const roles = lsGet<Role[]>(KEYS.roles, []);
+  const esCompras = (r: Role) => r.nombre.trim().toLowerCase().startsWith("compras");
+  if (!roles.some((r) => esCompras(r) && !("gestionar_convenios" in r.permisos))) return;
+  lsSet(
+    KEYS.roles,
+    roles.map((r) =>
+      esCompras(r) && !("gestionar_convenios" in r.permisos)
+        ? { ...r, permisos: { ...r.permisos, gestionar_convenios: true } }
+        : r,
+    ),
+  );
+}
+
+// El concepto de comprobación "Otros" ahora se llama "Vales": se renombra lo ya guardado.
+function backfillValesConcepto() {
+  const cg = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  if (!cg.some((c) => c.concepto === "Otros")) return;
+  lsSet(
+    KEYS.comprobantesGasto,
+    cg.map((c) => (c.concepto === "Otros" ? { ...c, concepto: "Vales" } : c)),
+  );
+}
+
+// ───────── Comprobantes (facturas) por par XML + PDF ─────────
+// Un concepto con factura se considera comprobado solo cuando el usuario carga el
+// **par XML + PDF** juntos; los dos archivos comparten `par_id`, el XML trae el
+// total y es el que aplica `monto_aplicado` al renglón. Los vales se comprueban con
+// un solo archivo (foto o PDF), sin XML. Un archivo suelto heredado (sin `par_id`)
+// queda "Incompleto" y no suma al comprobado.
+export type Factura = {
+  id: string;
+  solicitud_id: string;
+  tipo: "XML" | "PDF" | "FOTO";
+  fecha: string;
+  uuid: string;
+  archivo: string;
+  total: number;
+  status: "Verificado" | "Error" | "Incompleto";
+  // Renglón de comprobación al que se aplicó el monto y cuánto se aplicó (permite
+  // revertir exacto al eliminar).
+  concepto_id: string | null;
+  monto_aplicado: number;
+  // Data URL (base64): localStorage no guarda File/Blob.
+  contenido: string;
+  par_id?: string;
+};
+
+export function conceptoRequierePar(concepto: string) {
+  return concepto !== "Vales";
+}
+
+// Agrupa los archivos de un mismo comprobante (par XML+PDF); los sueltos quedan solos.
+export function agruparFacturas(fs: Factura[]): Factura[][] {
+  const grupos: Factura[][] = [];
+  const porPar = new Map<string, Factura[]>();
+  for (const f of fs) {
+    if (!f.par_id) {
+      grupos.push([f]);
+      continue;
+    }
+    let g = porPar.get(f.par_id);
+    if (!g) {
+      g = [];
+      porPar.set(f.par_id, g);
+      grupos.push(g);
+    }
+    g.push(f);
+  }
+  // XML primero dentro de cada par
+  for (const g of grupos) g.sort((a, b) => (a.tipo === "XML" ? -1 : 0) - (b.tipo === "XML" ? -1 : 0));
+  return grupos;
+}
+
+// La gasolina no se comprueba: ya no genera renglón de comprobación. Se retiran los que
+// se hubieran creado (y sus archivos).
+function backfillSinGasolina() {
+  const cg = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  const ids = new Set(cg.filter((c) => c.concepto === "Gasolina").map((c) => c.id));
+  if (!ids.size) return;
+  lsSet(KEYS.comprobantesGasto, cg.filter((c) => !ids.has(c.id)));
+  const fs = lsGet<Factura[]>(KEYS.facturasXml, []);
+  if (fs.some((f) => f.concepto_id && ids.has(f.concepto_id))) {
+    lsSet(KEYS.facturasXml, fs.filter((f) => !(f.concepto_id && ids.has(f.concepto_id))));
+  }
+}
+
+// Migra los archivos sueltos de antes de la regla del par:
+//  · demo sembrados (id "fv_…"): se genera el archivo faltante para completar el par;
+//  · cargados por un usuario con un solo archivo: quedan "Incompleto" y se revierte lo que
+//    habían aplicado al renglón (para comprobar hay que subir XML y PDF).
+function backfillParesComprobante() {
+  const facturas = lsGet<Factura[]>(KEYS.facturasXml, []);
+  if (!facturas.length) return;
+  const cg = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
+  const conceptoDe = (id: string | null) => cg.find((c) => c.id === id)?.concepto;
+
+  let cgNuevo = cg;
+  let cambio = false;
+  const agregadas: Factura[] = [];
+  const actualizadas = facturas.map((f) => {
+    if (f.par_id || f.status === "Incompleto" || f.status === "Error") return f;
+    const concepto = conceptoDe(f.concepto_id);
+    if (!concepto || !conceptoRequierePar(concepto)) return f;
+    cambio = true;
+    if (f.id.startsWith("fv_")) {
+      const parId = `par_${f.id}`;
+      const sol = solicitudes.find((s) => s.id === f.solicitud_id);
+      const sociedad = SEED_SOCIEDADES.find((so) => so.nombre === sol?.empresa);
+      const base = f.archivo.replace(/\.[^.]+$/, "");
+      if (f.tipo === "XML") {
+        agregadas.push({
+          ...f,
+          id: `${f.id}p`,
+          tipo: "PDF",
+          archivo: `${base}.pdf`,
+          monto_aplicado: 0,
+          par_id: parId,
+          contenido: fakePdfDataUrl([
+            `Representacion impresa - ${concepto}`.replace(/[^\x20-\x7E]/g, ""),
+            `Importe: $${f.total}.00 MXN`,
+            `UUID: ${f.uuid}`,
+          ]),
+        });
+      } else {
+        agregadas.push({
+          ...f,
+          id: `${f.id}x`,
+          tipo: "XML",
+          archivo: `${base}.xml`,
+          monto_aplicado: 0,
+          par_id: parId,
+          contenido: fakeXmlDataUrl({
+            emisor: "Proveedor", emisorRfc: "XAXX010101000",
+            receptor: sol?.empresa ?? "", receptorRfc: sociedad?.rfc ?? "XAXX010101000",
+            total: f.total, uuid: f.uuid, fecha: new Date().toISOString().slice(0, 10), concepto,
+          }),
+        });
+      }
+      return { ...f, par_id: parId };
+    }
+    // Archivo suelto cargado por un usuario: ya no cuenta como comprobante.
+    if (f.monto_aplicado > 0 && f.concepto_id) {
+      cgNuevo = cgNuevo.map((c) => {
+        if (c.id !== f.concepto_id) return c;
+        const comprobado = Math.max(0, c.monto_comprobado - f.monto_aplicado);
+        const completo = comprobado >= c.monto_solicitado && c.monto_solicitado > 0;
+        return {
+          ...c,
+          monto_comprobado: comprobado,
+          status_renglon: completo ? "comprobado" : comprobado > 0 ? "parcialmente_comprobado" : "pendiente",
+          ...(completo ? {} : { validado: false, validado_por: undefined, validado_fecha: undefined }),
+        };
+      });
+    }
+    return { ...f, status: "Incompleto" as const, monto_aplicado: 0 };
+  });
+  if (!cambio) return;
+  if (cgNuevo !== cg) lsSet(KEYS.comprobantesGasto, cgNuevo);
+  lsSet(KEYS.facturasXml, [...actualizadas, ...agregadas]);
+}
+
+// ───────── Convenios ⇄ catálogo de hoteles ─────────
+export const ESTADOS_MX = [
+  "Aguascalientes", "Baja California", "Baja California Sur", "Campeche", "Chiapas",
+  "Chihuahua", "CDMX", "Coahuila", "Colima", "Durango", "Estado de México", "Guanajuato",
+  "Guerrero", "Hidalgo", "Jalisco", "Michoacán", "Morelos", "Nayarit", "Nuevo León", "Oaxaca",
+  "Puebla", "Querétaro", "Quintana Roo", "San Luis Potosí", "Sinaloa", "Sonora", "Tabasco",
+  "Tamaulipas", "Tlaxcala", "Veracruz", "Yucatán", "Zacatecas",
+];
+
+const normTexto = (t: string) =>
+  t.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+const claveConvenio = (nombre: string, destino: string) =>
+  `${normTexto(nombre)}|${normTexto(destino)}`;
+
+// Los convenios alimentan el catálogo de hoteles (ckl_hoteles) que usa "Solicitar viáticos":
+// por cada hotel (nombre + destino) el convenio activo más reciente fija nombre, ciudad,
+// estado y tarifa predeterminada por noche (= costo de habitación sencilla). Si todos sus
+// convenios están en baja, el hotel deja de ofrecerse en nuevas solicitudes (activo:false;
+// las solicitudes existentes lo siguen mostrando). Idempotente. Los hoteles sembrados sin
+// convenio no se tocan; un hotel sembrado con el mismo nombre y ciudad se adopta.
+export function sincronizarCatalogoConvenios(usuarioId: string | null = null) {
+  const convenios = lsGet<Convenio[]>(KEYS.convenios, []);
+  const hoteles = lsGet<Hotel[]>(KEYS.hoteles, []);
+  const grupos = new Map<string, Convenio[]>();
+  for (const c of convenios) {
+    if (!c.estado) continue; // sin estado no se puede ubicar en Solicitar
+    const k = claveConvenio(c.nombre_comercial, c.destino);
+    grupos.set(k, [...(grupos.get(k) ?? []), c]);
+  }
+
+  const resultado = [...hoteles];
+  let siguienteId = Math.max(0, ...hoteles.map((h) => h.id)) + 1;
+  let creados = 0;
+  let actualizados = 0;
+  let desactivados = 0;
+
+  for (const [k, grupo] of grupos) {
+    const vigente = grupo.filter((c) => c.activo).sort((a, b) => b.anio - a.anio)[0];
+    let idx = resultado.findIndex((h) => h.convenio_clave === k);
+    if (idx === -1 && vigente) {
+      idx = resultado.findIndex(
+        (h) =>
+          !h.convenio_clave &&
+          normTexto(h.nombre) === normTexto(vigente.nombre_comercial) &&
+          normTexto(h.ciudad) === normTexto(vigente.destino),
+      );
+    }
+    if (vigente) {
+      const datos = {
+        nombre: vigente.nombre_comercial,
+        ciudad: vigente.destino,
+        estado: vigente.estado,
+        tarifa_base: vigente.costo_sencilla,
+        tarifa_doble: vigente.costo_doble && vigente.costo_doble > 0 ? vigente.costo_doble : null,
+        activo: true,
+        convenio_clave: k,
+      };
+      if (idx === -1) {
+        resultado.push({ id: siguienteId++, ...datos });
+        creados++;
+      } else {
+        const h = resultado[idx];
+        const igual =
+          h.nombre === datos.nombre && h.ciudad === datos.ciudad && h.estado === datos.estado &&
+          h.tarifa_base === datos.tarifa_base && (h.tarifa_doble ?? null) === datos.tarifa_doble &&
+          h.activo && h.convenio_clave === k;
+        if (!igual) {
+          resultado[idx] = { ...h, ...datos };
+          actualizados++;
+        }
+      }
+    } else if (idx !== -1 && resultado[idx].activo) {
+      resultado[idx] = { ...resultado[idx], activo: false };
+      desactivados++;
+    }
+  }
+
+  if (!creados && !actualizados && !desactivados) return { creados, actualizados, desactivados };
+  lsSet(KEYS.hoteles, resultado);
+  registrarLog("catalogo_hoteles_sincronizado", "catalogo", "hoteles", usuarioId, {
+    creados, actualizados, desactivados,
+  });
+  return { creados, actualizados, desactivados };
+}
+
+// Convenios guardados antes de existir el campo "estado": se completa por destino conocido
+// y se sincroniza el catálogo.
+function backfillConveniosCatalogo() {
+  const convenios = lsGet<Convenio[]>(KEYS.convenios, []);
+  if (convenios.some((c) => !c.estado && ESTADO_POR_DESTINO[c.destino])) {
+    lsSet(
+      KEYS.convenios,
+      convenios.map((c) =>
+        !c.estado && ESTADO_POR_DESTINO[c.destino] ? { ...c, estado: ESTADO_POR_DESTINO[c.destino] } : c,
+      ),
+    );
+  }
+  sincronizarCatalogoConvenios(null);
 }

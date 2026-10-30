@@ -15,6 +15,7 @@ const MODULOS: { key: string; label: string }[] = [
   { key: "comprobar", label: "Comprobar" },
   { key: "validar_comprobacion", label: "Validar comprobaciones" },
   { key: "revisar_monto_manual", label: "Revisar montos manuales de hotel" },
+  { key: "gestionar_convenios", label: "Gestionar convenios con hoteles" },
   { key: "ver_equipo", label: "Ver equipo" },
   { key: "ver_todo", label: "Ver todo" },
   { key: "autorizar_lte5000", label: "Autorizar ≤ umbral" },
