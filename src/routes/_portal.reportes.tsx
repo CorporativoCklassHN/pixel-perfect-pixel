@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Search, FileSpreadsheet, Mail } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -17,14 +17,22 @@ import {
   type User,
 } from "@/lib/store";
 import { StatusBadge } from "./_portal.dashboard";
+import { ReporteGasto } from "@/components/portal/GastoPorConcepto";
 
 export const Route = createFileRoute("/_portal/reportes")({
+  // vista=gasto abre directamente el reporte de gasto por concepto
+  validateSearch: (search: Record<string, unknown>): { vista?: "gasto" } =>
+    search.vista === "gasto" ? { vista: "gasto" } : {},
   head: () => ({ meta: [{ title: "Reportes — CKL" }] }),
   component: Reportes,
 });
 
 function Reportes() {
   const { user, role, hasPerm } = useAuth();
+  const { vista } = Route.useSearch();
+  const nav = useNavigate();
+  const puedeGasto = hasPerm("ver_gasto_por_concepto");
+  const enGasto = vista === "gasto" && puedeGasto;
   const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
   const [users] = useLocalStorage<User[]>(KEYS.users, []);
   const [sociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
@@ -90,8 +98,36 @@ function Reportes() {
     return <div className="ckl-card p-8 text-center text-sm">Sin permiso para acceder.</div>;
   }
 
+  const pestana = (activa: boolean, texto: string, alIr: () => void) => (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={activa}
+      onClick={alIr}
+      className="rounded-md px-4 py-2 text-sm font-semibold"
+      style={{
+        background: activa ? "var(--color-primary)" : "#F1F1F1",
+        color: activa ? "#fff" : "var(--color-foreground)",
+      }}
+    >
+      {texto}
+    </button>
+  );
+
   return (
     <div className="space-y-4">
+      {puedeGasto && (
+        <div role="tablist" className="flex flex-wrap gap-2">
+          {pestana(!enGasto, "Solicitudes", () => nav({ to: "/reportes", search: {}, replace: true }))}
+          {pestana(enGasto, "Gasto por concepto", () =>
+            nav({ to: "/reportes", search: { vista: "gasto" }, replace: true }),
+          )}
+        </div>
+      )}
+      {enGasto ? (
+        <ReporteGasto />
+      ) : (
+        <>
       <div className="ckl-card p-4">
         <div className="grid gap-3 md:grid-cols-5">
           <div><label className="ckl-label">Fecha inicial *</label><input type="date" className="ckl-input" value={fi} onChange={(e) => setFi(e.target.value)} /></div>
@@ -163,6 +199,8 @@ function Reportes() {
           </table>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

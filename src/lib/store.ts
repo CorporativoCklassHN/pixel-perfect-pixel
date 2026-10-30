@@ -657,6 +657,7 @@ export function initSeed() {
   backfillValidarComprobacion();
   backfillRevisarMontoManual();
   backfillGestionarConvenios();
+  backfillVerGastoPorConcepto();
   backfillEscenariosValidacion();
   backfillEscenariosMontoManual();
   backfillFolioCollisions();
@@ -2097,6 +2098,38 @@ export const SEED_CONVENIOS: Convenio[] = [
   cv(14, { no_sucursal: "Suc037", destino: "Saltillo", nombre_comercial: "Hotel Colonial San Miguel", costo_sencilla: 950, costo_doble: null, no_proveedor: "402970", razon_social: "Carmen Del Rosario Herrera Ruiz", telefono: "844 410 3044", contacto: "Gerardo / Elisa / Griselda / Claudia", banco: "", correo: "", notas: "Mejoraron tarifa en el mes de enero: 760 por noche" }),
 ];
 
+// Convenios del año en curso (2026) de ejemplo: renovaciones de los de 2025, algunas con
+// tarifa nueva. Los de 2025 quedan como histórico (solo estadísticas/comparativas) y NO se
+// ofrecen en Solicitar; Tabasco Inn (baja) y Hotel Colonial San Miguel no renuevan.
+const AJUSTE_2026: Record<number, { costo_sencilla?: number; costo_doble?: number }> = {
+  2: { costo_sencilla: 720, costo_doble: 920 },
+  6: { costo_sencilla: 1480, costo_doble: 1650 },
+  9: { costo_sencilla: 770 },
+};
+const NO_RENUEVAN_2026 = new Set([11, 14]);
+SEED_CONVENIOS.push(
+  ...SEED_CONVENIOS.filter((c) => !NO_RENUEVAN_2026.has(Number(c.id.replace("cv", "")))).map(
+    (c): Convenio => {
+      const n = Number(c.id.replace("cv", ""));
+      return {
+        ...c,
+        id: `cv${100 + n}`,
+        anio: 2026,
+        ...AJUSTE_2026[n],
+        creado_at: "2026-01-12T10:00:00.000Z",
+        actualizado_at: "2026-01-12T10:00:00.000Z",
+      };
+    },
+  ),
+);
+
+// Navegadores que ya tenían convenios guardados reciben los de ejemplo que les falten (por id).
+function backfillConveniosFaltantes() {
+  const convenios = lsGet<Convenio[]>(KEYS.convenios, []);
+  const faltan = SEED_CONVENIOS.filter((c) => !convenios.some((x) => x.id === c.id));
+  if (faltan.length) lsSet(KEYS.convenios, [...convenios, ...faltan]);
+}
+
 // Compras (compras_corporativas y roles creados a mano que empiezan con "compras")
 // recibe el permiso de gestionar convenios si aún no tiene la clave; no se pisa lo que
 // el admin ya haya fijado en Permisos.
@@ -2278,14 +2311,15 @@ const claveConvenio = (nombre: string, destino: string) =>
   `${normTexto(nombre)}|${normTexto(destino)}`;
 
 // Los convenios alimentan el catálogo de hoteles (ckl_hoteles) que usa "Solicitar viáticos":
-// por cada hotel (nombre + destino) el convenio activo más reciente fija nombre, ciudad,
-// estado y tarifa predeterminada por noche (= costo de habitación sencilla). Si todos sus
-// convenios están en baja, el hotel deja de ofrecerse en nuevas solicitudes (activo:false;
+// por cada hotel (nombre + destino) el convenio activo del AÑO EN CURSO fija nombre, ciudad,
+// estado y tarifa predeterminada por noche (= costo de habitación sencilla). Si no tiene
+// convenio activo del año en curso (solo histórico o en baja), el hotel deja de ofrecerse en nuevas solicitudes (activo:false;
 // las solicitudes existentes lo siguen mostrando). Idempotente. Los hoteles sembrados sin
 // convenio no se tocan; un hotel sembrado con el mismo nombre y ciudad se adopta.
 export function sincronizarCatalogoConvenios(usuarioId: string | null = null) {
   const convenios = lsGet<Convenio[]>(KEYS.convenios, []);
   const hoteles = lsGet<Hotel[]>(KEYS.hoteles, []);
+  const anioActual = new Date().getFullYear();
   const grupos = new Map<string, Convenio[]>();
   for (const c of convenios) {
     if (!c.estado) continue; // sin estado no se puede ubicar en Solicitar
@@ -2300,7 +2334,11 @@ export function sincronizarCatalogoConvenios(usuarioId: string | null = null) {
   let desactivados = 0;
 
   for (const [k, grupo] of grupos) {
-    const vigente = grupo.filter((c) => c.activo).sort((a, b) => b.anio - a.anio)[0];
+    // Solo el convenio ACTIVO del año en curso fija las tarifas que se ofrecen; los de años
+    // anteriores son histórico (estadísticas/comparativas) y no se ofrecen en Solicitar.
+    const vigente = grupo
+      .filter((c) => c.activo && c.anio === anioActual)
+      .sort((a, b) => b.actualizado_at.localeCompare(a.actualizado_at))[0];
     let idx = resultado.findIndex((h) => h.convenio_clave === k);
     if (idx === -1 && vigente) {
       idx = resultado.findIndex(
@@ -2351,6 +2389,7 @@ export function sincronizarCatalogoConvenios(usuarioId: string | null = null) {
 // Convenios guardados antes de existir el campo "estado": se completa por destino conocido
 // y se sincroniza el catálogo.
 function backfillConveniosCatalogo() {
+  backfillConveniosFaltantes();
   const convenios = lsGet<Convenio[]>(KEYS.convenios, []);
   if (convenios.some((c) => !c.estado && ESTADO_POR_DESTINO[c.destino])) {
     lsSet(
@@ -2361,4 +2400,108 @@ function backfillConveniosCatalogo() {
     );
   }
   sincronizarCatalogoConvenios(null);
+}
+
+// ───────── Gasto por concepto (Dashboard y Reportes) ─────────
+// Para Administrador, Finanzas y Compras (permiso ver_gasto_por_concepto). Se construye a
+// partir de los renglones de comprobación de cada solicitud (concepto + monto solicitado /
+// comprobado) y de la gasolina del desglose del destino (la gasolina no se comprueba, así
+// que cuenta igual como solicitada y como comprobada). Las solicitudes rechazadas no cuentan.
+export type CategoriaGasto =
+  | "Hotel"
+  | "Transporte foráneo"
+  | "Transporte local"
+  | "Comida"
+  | "Automóvil"
+  | "Vales";
+
+// Orden fijo: define el color de cada concepto en las gráficas (nunca se reordena por monto).
+export const CATEGORIAS_GASTO: CategoriaGasto[] = [
+  "Hotel",
+  "Transporte foráneo",
+  "Transporte local",
+  "Comida",
+  "Automóvil",
+  "Vales",
+];
+
+export type RenglonGasto = {
+  solicitud_id: string;
+  folio: string;
+  user_id: string;
+  empresa: string;
+  created_at: string; // YYYY-MM-DD
+  categoria: CategoriaGasto;
+  subconcepto: string; // Avión, Autobús, Uber, Gasolina, Caseta…
+  solicitado: number;
+  comprobado: number;
+};
+
+const FORANEOS = new Set(["Avión", "Autobús", "Tren", "Otro (foráneo)", "Transporte foráneo"]);
+const LOCALES = new Set(["Uber", "Taxi", "Metro", "Combi", "Otro (transporte local)", "Transporte local"]);
+
+function clasificarConcepto(concepto: string): { categoria: CategoriaGasto; sub: string } | null {
+  if (concepto === "Hotel") return { categoria: "Hotel", sub: "Hotel" };
+  if (FORANEOS.has(concepto)) return { categoria: "Transporte foráneo", sub: concepto };
+  if (LOCALES.has(concepto)) return { categoria: "Transporte local", sub: concepto };
+  if (concepto === "Comida") return { categoria: "Comida", sub: "Comida" };
+  if (concepto === "Caseta") return { categoria: "Automóvil", sub: "Caseta" };
+  if (concepto === "Vales" || concepto === "Otros") return { categoria: "Vales", sub: "Vales" };
+  return null;
+}
+
+export function renglonesGasto(
+  solicitudes: Solicitud[],
+  comprobantes: ComprobanteGasto[],
+  destinos: { solicitud_id: string; automovil?: { gasolina?: number } }[],
+): RenglonGasto[] {
+  const out: RenglonGasto[] = [];
+  for (const s of solicitudes) {
+    if (s.estatus === "Rechazado") continue;
+    const base = {
+      solicitud_id: s.id,
+      folio: s.folio,
+      user_id: s.user_id,
+      empresa: s.empresa,
+      created_at: s.created_at,
+    };
+    for (const c of comprobantes) {
+      if (c.solicitud_id !== s.id || !(c.monto_solicitado > 0)) continue;
+      const cl = clasificarConcepto(c.concepto);
+      if (!cl) continue;
+      out.push({
+        ...base,
+        categoria: cl.categoria,
+        subconcepto: cl.sub,
+        solicitado: c.monto_solicitado,
+        comprobado: c.monto_comprobado,
+      });
+    }
+    const gasolina = destinos
+      .filter((d) => d.solicitud_id === s.id)
+      .reduce((a, d) => a + (Number(d.automovil?.gasolina) || 0), 0);
+    if (gasolina > 0) {
+      out.push({ ...base, categoria: "Automóvil", subconcepto: "Gasolina", solicitado: gasolina, comprobado: gasolina });
+    }
+  }
+  return out;
+}
+
+// Administrador, Finanzas y Compras (compras_corporativas y roles que empiezan con "compras")
+// ven el gasto por concepto; si el admin ya fijó la clave en Permisos no se toca.
+function backfillVerGastoPorConcepto() {
+  const roles = lsGet<Role[]>(KEYS.roles, []);
+  const aplica = (r: Role) => {
+    const n = r.nombre.trim().toLowerCase();
+    return n === "administrador" || n === "finanzas" || n.startsWith("compras");
+  };
+  if (!roles.some((r) => aplica(r) && !("ver_gasto_por_concepto" in r.permisos))) return;
+  lsSet(
+    KEYS.roles,
+    roles.map((r) =>
+      aplica(r) && !("ver_gasto_por_concepto" in r.permisos)
+        ? { ...r, permisos: { ...r.permisos, ver_gasto_por_concepto: true } }
+        : r,
+    ),
+  );
 }

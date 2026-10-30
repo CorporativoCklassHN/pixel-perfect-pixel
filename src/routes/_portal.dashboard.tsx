@@ -15,6 +15,7 @@ import {
   type ComprobanteGasto,
 } from "@/lib/store";
 import { toast } from "sonner";
+import { PanelGastoDashboard } from "@/components/portal/GastoPorConcepto";
 
 export const Route = createFileRoute("/_portal/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — Portal CKL" }] }),
@@ -322,6 +323,9 @@ function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Solo Administrador, Finanzas y Compras (permiso ver_gasto_por_concepto) */}
+      <PanelGastoDashboard />
 
       <div className="ckl-card overflow-hidden">
         <div className="flex items-center justify-between border-b p-4">

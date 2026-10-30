@@ -20,6 +20,8 @@ export const Route = createFileRoute("/_portal/convenios")({
   component: Convenios,
 });
 
+const ANIO_ACTUAL = new Date().getFullYear();
+
 const moneda = (n: number | null | undefined) =>
   n == null ? "—" : n.toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 
@@ -115,7 +117,12 @@ function Convenios() {
           coincide &&
           (destino === "Todos" || c.destino === destino) &&
           (anio === "Todos" || String(c.anio) === anio) &&
-          (estatus === "Todos" || (estatus === "Activos" ? c.activo : !c.activo))
+          (estatus === "Todos" ||
+            (estatus === "Vigentes"
+              ? c.activo && c.anio === ANIO_ACTUAL
+              : estatus === "Históricos"
+                ? c.activo && c.anio < ANIO_ACTUAL
+                : !c.activo))
         );
       })
       .sort(
@@ -188,7 +195,11 @@ function Convenios() {
         costo_doble: nuevo.costo_doble,
       });
       sincronizarCatalogoConvenios(user?.id ?? null);
-      toast.success("Convenio dado de alta (catálogo de hoteles actualizado).");
+      toast.success(
+        nuevo.anio === ANIO_ACTUAL
+          ? "Convenio dado de alta (catálogo de hoteles actualizado)."
+          : `Convenio de ${nuevo.anio} guardado como histórico (no se ofrece en Solicitar).`,
+      );
     } else {
       const original = convenios.find((x) => x.id === c.id);
       const cambios: Record<string, { antes: unknown; despues: unknown }> = {};
@@ -243,15 +254,30 @@ function Convenios() {
     toast.success("Convenio reactivado (el hotel vuelve a ofrecerse en nuevas solicitudes).");
   };
 
-  const insignia = (c: Convenio) => (
-    <span
-      className="ckl-badge"
-      style={{ background: c.activo ? "#D8F3DC" : "#FEE9EA", color: c.activo ? "#2D6A4F" : "#E30613" }}
-      title={!c.activo ? `${c.baja_motivo ?? "Sin motivo"}${c.baja_fecha ? " · " + fh(c.baja_fecha) : ""}` : undefined}
-    >
-      {c.activo ? "Activo" : "Baja"}
-    </span>
-  );
+  // Vigente = activo del año en curso (el que se ofrece en Solicitar); Histórico = activo de
+  // años anteriores (solo estadísticas/comparativas); Baja = dado de baja.
+  const insignia = (c: Convenio) => {
+    const ui = !c.activo
+      ? { t: "Baja", bg: "#FEE9EA", fg: "#E30613" }
+      : c.anio === ANIO_ACTUAL
+        ? { t: "Vigente", bg: "#D8F3DC", fg: "#2D6A4F" }
+        : { t: "Histórico", bg: "#F1F3F5", fg: "#555" };
+    return (
+      <span
+        className="ckl-badge"
+        style={{ background: ui.bg, color: ui.fg }}
+        title={
+          !c.activo
+            ? `${c.baja_motivo ?? "Sin motivo"}${c.baja_fecha ? " · " + fh(c.baja_fecha) : ""}`
+            : c.anio === ANIO_ACTUAL
+              ? "Se ofrece en Solicitar viáticos"
+              : "Año anterior: solo para estadísticas y comparativas; no se ofrece en Solicitar"
+        }
+      >
+        {ui.t}
+      </span>
+    );
+  };
 
   const acciones = (c: Convenio) => (
     <div className="flex items-center gap-1">
@@ -322,7 +348,7 @@ function Convenios() {
         <div>
           <label className="ckl-label">Estatus</label>
           <select className="ckl-input" value={estatus} onChange={(e) => setEstatus(e.target.value)}>
-            {["Todos", "Activos", "Baja"].map((s) => (
+            {["Todos", "Vigentes", "Históricos", "Baja"].map((s) => (
               <option key={s}>{s}</option>
             ))}
           </select>
@@ -434,8 +460,9 @@ function Convenios() {
           </table>
         </div>
         <div className="border-t bg-secondary p-2 text-[11px] text-muted-foreground">
-          {filtrados.length} de {convenios.length} convenio(s). La baja es lógica: el registro y su
-          historial se conservan.
+          {filtrados.length} de {convenios.length} convenio(s). Solo los convenios <b>vigentes</b> (año{" "}
+          {ANIO_ACTUAL}) se ofrecen en Solicitar viáticos; los de años anteriores se conservan como
+          histórico para estadísticas y comparativas. La baja es lógica.
         </div>
       </div>
 
