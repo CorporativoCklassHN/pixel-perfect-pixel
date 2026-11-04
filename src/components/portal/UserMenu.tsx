@@ -3,7 +3,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { ChevronDown, Eye, EyeOff, KeyRound, LogOut, CheckCircle2, Circle } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
-import { cambiarContrasena, evaluarContrasena, PASSWORD_MIN_LENGTH } from "@/lib/store";
+import { evaluarContrasena, PASSWORD_MIN_LENGTH } from "@/lib/store";
+import { api, ApiError } from "@/lib/api";
+import { useApiMutation } from "@/lib/queries";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,8 +64,8 @@ export function UserMenu() {
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="cursor-pointer gap-2 py-2.5"
-            onSelect={() => {
-              logout();
+            onSelect={async () => {
+              await logout();
               nav({ to: "/login" });
             }}
           >
@@ -90,6 +92,16 @@ function CambiarContrasenaDialog({ onClose }: { onClose: () => void }) {
   const [confirmar, setConfirmar] = useState("");
   const [ver, setVer] = useState(false);
   const [errorActual, setErrorActual] = useState("");
+  const cambiar = useApiMutation(
+    () => api.post("/auth/cambiar-contrasena", { actual, nueva }),
+    {
+      silencioso: true,
+      onSuccess: () => {
+        toast.success("Contraseña actualizada.");
+        onClose();
+      },
+    },
+  );
   if (!user) return null;
 
   const reglas = evaluarContrasena(nueva, user);
@@ -101,17 +113,15 @@ function CambiarContrasenaDialog({ onClose }: { onClose: () => void }) {
   const guardar = (e: React.FormEvent) => {
     e.preventDefault();
     if (!valido) return;
-    const r = cambiarContrasena(user.id, actual, nueva);
-    if (r === "actual_incorrecta") {
-      setErrorActual("La contraseña actual no es correcta.");
-      return;
-    }
-    if (r !== "ok") {
-      setErrorActual("No se pudo actualizar la contraseña.");
-      return;
-    }
-    toast.success("Contraseña actualizada.");
-    onClose();
+    cambiar.mutate(undefined, {
+      onError: (err) => {
+        if (err instanceof ApiError && err.code === "ACTUAL_INCORRECTA") {
+          setErrorActual("La contraseña actual no es correcta.");
+        } else {
+          setErrorActual(err instanceof Error && err.message ? err.message : "No se pudo actualizar la contraseña.");
+        }
+      },
+    });
   };
 
   const campo = (

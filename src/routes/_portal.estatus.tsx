@@ -15,25 +15,31 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
-import { useLocalStorage } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
+import { api } from "@/lib/api";
 import {
-  KEYS,
+  CONFIG_DEFAULTS,
+  lista,
+  useApiMutation,
+  useAutorizaciones,
+  useCatalogos,
+  useComprobantes,
+  useConfig,
+  useRevisionesMonto,
+  useSolicitudDetalle,
+  useSolicitudes,
+  useUsuarios,
+  type DestinoApi,
+} from "@/lib/queries";
+import {
   fmtMoney,
-  uid,
-  filterSolicitudesByDateCutoff,
-  filterSolicitudesByOwnership,
   avanceComprobacion,
   avanceValidacion,
   bloqueoMontoHotel,
   estatusVisible,
-  type RevisionMontoManual,
   ESTATUS_VISIBLES,
   type Solicitud,
-  type User,
-  type Autorizacion,
   type Hotel,
-  type ComprobanteGasto,
 } from "@/lib/store";
 import { StatusBadge } from "./_portal.dashboard";
 import { Modal } from "./_portal.solicitar";
@@ -45,34 +51,7 @@ export const Route = createFileRoute("/_portal/estatus")({
   component: Estatus,
 });
 
-// Refleja la forma que guarda "Solicitar viáticos" en KEYS.destinos — no se
-// exporta desde ahí porque es un detalle de esa pantalla, pero Estatus la lee
-// para mostrarle a quien autoriza el desglose completo (hoteles, transportes,
-// otros conceptos) detrás del monto total.
-type HotelStayStored = {
-  id: string;
-  fecha_inicio: string;
-  fecha_fin: string;
-  monto: number;
-  manual: boolean;
-  hotel_id?: number;
-  motivo_cambio?: string;
-  tipo_habitacion?: "sencilla" | "doble";
-};
-type RowStored = { id: string; tipo: string; monto: number };
-type OtroRowStored = { id: string; concepto: string; monto: number };
-type DestinoStored = {
-  id: string;
-  solicitud_id: string;
-  estado: string;
-  fecha_inicio: string;
-  fecha_fin: string;
-  hoteles: HotelStayStored[];
-  foraneo: RowStored[];
-  local: RowStored[];
-  otros: OtroRowStored[]; // "Vales"
-  automovil?: { gasolina: number; caseta: number };
-};
+type HotelStayStored = DestinoApi["hoteles"][number];
 
 function daysBetween(a: string, b: string) {
   if (!a || !b) return 0;
@@ -102,14 +81,20 @@ function Estatus() {
   const { user, role, hasPerm } = useAuth();
   const nav = useNavigate();
   const { atrasados: soloAtrasados } = Route.useSearch();
-  const [solicitudes, setSolicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
-  const [autorizaciones, setAutorizaciones] = useLocalStorage<Autorizacion[]>(KEYS.autorizaciones, []);
-  const [users] = useLocalStorage<User[]>(KEYS.users, []);
-  const [destinosAll] = useLocalStorage<DestinoStored[]>(KEYS.destinos, []);
-  const [comprobantesGasto] = useLocalStorage<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
-  const [hotelesCatalogo] = useLocalStorage<Hotel[]>(KEYS.hoteles, []);
-  const [revisionesMonto] = useLocalStorage<RevisionMontoManual[]>(KEYS.revisionesMonto, []);
-  const config = JSON.parse(typeof window !== "undefined" ? localStorage.getItem(KEYS.config) ?? "{}" : "{}");
+  const { data: solicitudesData } = useSolicitudes(true);
+  const solicitudes = lista(solicitudesData);
+  const { data: autorizacionesData } = useAutorizaciones();
+  const autorizaciones = lista(autorizacionesData);
+  const { data: usersData } = useUsuarios();
+  const users = lista(usersData);
+  const { data: comprobantesData } = useComprobantes();
+  const comprobantesGasto = lista(comprobantesData);
+  const { data: catalogos } = useCatalogos();
+  const hotelesCatalogo: Hotel[] = lista(catalogos?.hoteles);
+  const { data: revisionesData } = useRevisionesMonto();
+  const revisionesMonto = lista(revisionesData);
+  const { data: configData } = useConfig();
+  const config = configData ?? CONFIG_DEFAULTS;
   const umbral = config.umbral_finanzas ?? 5000;
   const diasComprobacionAtrasada = config.dias_comprobacion_atrasada ?? 7;
 
@@ -119,6 +104,7 @@ function Estatus() {
   const [detail, setDetail] = useState<Solicitud | null>(null);
   const [rejecting, setRejecting] = useState<Solicitud | null>(null);
   const [rejectNote, setRejectNote] = useState("");
+  const { data: detalle } = useSolicitudDetalle(detail?.id);
 
   // Mismo criterio que usa "Comprobación": comprobado solo cuando el total
   // comprobado iguala al total solicitado en todos sus renglones.
@@ -167,15 +153,12 @@ function Estatus() {
   // aplica la ventana de fechas del rol. Más recientes primero (empate: folio mayor).
   const visibles = useMemo(
     () =>
-      filterSolicitudesByDateCutoff(
-        filterSolicitudesByOwnership(user, role, solicitudes, users),
-        role?.nombre,
-      ).sort(
+      [...solicitudes].sort(
         (a, b) =>
           b.created_at.localeCompare(a.created_at) ||
           b.folio.localeCompare(a.folio, undefined, { numeric: true }),
       ),
-    [user, role, solicitudes, users],
+    [solicitudes],
   );
   // Opciones del filtro por Usuario: solo quienes tienen folios dentro del alcance.
   const usuariosOpciones = useMemo(() => {
@@ -212,10 +195,7 @@ function Estatus() {
 
   // Desglose detallado (hoteles, transportes, otros conceptos) del folio abierto
   // en el modal, para que quien autoriza vea qué compone el monto total.
-  const destinosDetail = useMemo(
-    () => (detail ? destinosAll.filter((d) => d.solicitud_id === detail.id) : []),
-    [detail, destinosAll],
-  );
+  const destinosDetail: DestinoApi[] = detail ? (detalle?.destinos ?? []) : [];
   const resumenMontos = useMemo(
     () => (detail ? comprobantesGasto.filter((c) => c.solicitud_id === detail.id) : []),
     [detail, comprobantesGasto],
@@ -239,78 +219,69 @@ function Estatus() {
     return false;
   };
 
+  // El servidor aplica las reglas (quién autoriza, umbral, bloqueo por monto manual, cierre).
+  const autorizarMut = useApiMutation((s: Solicitud) => api.post(`/solicitudes/${s.id}/autorizar`), {
+    onSuccess: (_r, s) => {
+      toast.success(`Solicitud ${s.folio} autorizada.`);
+      setDetail(null);
+    },
+  });
   const authorize = (s: Solicitud) => {
-    const which = canAuth(s);
-    if (!which) return;
-    const bloqueo = bloqueoDe(s);
-    if (bloqueo) return showErrorDialog(bloqueo);
-    const newAuth: Autorizacion = {
-      id: uid("a_"), solicitud_id: s.id,
-      rol_autorizador: which === "jefe" ? "jefe_inmediato" : "finanzas",
-      user_id: user!.id, status: "autorizado", fecha: new Date().toISOString().slice(0, 10), nota: "",
-    };
-    setAutorizaciones([...autorizaciones, newAuth]);
-    setSolicitudes(solicitudes.map((x) => {
-      if (x.id !== s.id) return x;
-      const updated: Solicitud = { ...x };
-      if (which === "jefe") {
-        updated.jefe_status = "Autorizado";
-        if (updated.finanzas_status === "N/A") updated.estatus = "Cerrado";
-      } else {
-        updated.finanzas_status = "Autorizado";
-        updated.estatus = "Cerrado";
-      }
-      return updated;
-    }));
-    toast.success(`Solicitud ${s.folio} autorizada.`);
-    setDetail(null);
+    if (!canAuth(s)) return;
+    autorizarMut.mutate(s);
   };
 
+  const rechazarMut = useApiMutation(
+    (v: { s: Solicitud; nota: string }) =>
+      api.post(`/solicitudes/${v.s.id}/rechazar`, { nota: v.nota }),
+    {
+      onSuccess: (_r, v) => {
+        showErrorDialog(`Solicitud ${v.s.folio} rechazada.`);
+        setRejecting(null);
+        setRejectNote("");
+        setDetail(null);
+      },
+    },
+  );
   const reject = () => {
     if (!rejecting || !rejectNote.trim()) return showErrorDialog("Captura el motivo.");
-    const which = canAuth(rejecting);
-    const newAuth: Autorizacion = {
-      id: uid("a_"), solicitud_id: rejecting.id,
-      rol_autorizador: which === "finanzas" ? "finanzas" : "jefe_inmediato",
-      user_id: user!.id, status: "rechazado", fecha: new Date().toISOString().slice(0, 10), nota: rejectNote,
-    };
-    setAutorizaciones([...autorizaciones, newAuth]);
-    setSolicitudes(solicitudes.map((x) => x.id === rejecting.id ? { ...x, estatus: "Rechazado", nota_rechazo: rejectNote, [which === "finanzas" ? "finanzas_status" : "jefe_status"]: "Rechazado" } as Solicitud : x));
-    showErrorDialog(`Solicitud ${rejecting.folio} rechazada.`);
-    setRejecting(null); setRejectNote(""); setDetail(null);
+    rechazarMut.mutate({ s: rejecting, nota: rejectNote });
   };
 
-  const subirComprobante = (s: Solicitud) => {
-    const today = new Date().toLocaleDateString("es-MX");
-    setSolicitudes(solicitudes.map((x) => x.id === s.id ? { ...x, comprobante_viaje: today } : x));
-    toast.success("Comprobante de viaje cargado.");
-  };
+  const comprobanteMut = useApiMutation(
+    (s: Solicitud) => api.post(`/solicitudes/${s.id}/comprobante-viaje`),
+    {
+      onSuccess: () => {
+        toast.success("Comprobante de viaje cargado.");
+        setDetail(null);
+      },
+    },
+  );
+  const subirComprobante = (s: Solicitud) => comprobanteMut.mutate(s);
 
+  const eliminarMut = useApiMutation((s: Solicitud) => api.del(`/solicitudes/${s.id}`), {
+    onSuccess: () => {
+      toast.success("Solicitud eliminada.");
+      setDetail(null);
+    },
+  });
   const eliminar = (s: Solicitud) => {
     if (autorizaciones.find((a) => a.solicitud_id === s.id)) return showErrorDialog("No se puede eliminar: ya tiene autorizaciones.");
     if (!confirm(`¿Eliminar solicitud ${s.folio}?`)) return;
-    setSolicitudes(solicitudes.filter((x) => x.id !== s.id));
-    toast.success("Solicitud eliminada.");
+    eliminarMut.mutate(s);
   };
 
   // Herramienta de corrección para administradores: borra las autorizaciones/
-  // rechazos ya registrados y regresa la solicitud a Abierto/Pendiente, por si
-  // se autorizó o rechazó por error (p. ej. un rol con permisos de más de un
-  // nivel resolvió el paso equivocado).
+  // rechazos ya registrados y regresa la solicitud a Abierto/Pendiente.
+  const revertirMut = useApiMutation((s: Solicitud) => api.post(`/solicitudes/${s.id}/revertir`), {
+    onSuccess: (_r, s) => {
+      toast.success(`Solicitud ${s.folio} revertida a Abierto/Pendiente.`);
+      setDetail(null);
+    },
+  });
   const revertir = (s: Solicitud) => {
     if (!confirm(`¿Revertir las autorizaciones de la solicitud ${s.folio} y regresarla a Abierto/Pendiente?`)) return;
-    setAutorizaciones(autorizaciones.filter((a) => a.solicitud_id !== s.id));
-    setSolicitudes(solicitudes.map((x) => (x.id === s.id
-      ? {
-          ...x,
-          estatus: "Abierto",
-          jefe_status: "Pendiente",
-          finanzas_status: x.finanzas_status === "N/A" ? "N/A" : "Pendiente",
-          nota_rechazo: undefined,
-        }
-      : x)));
-    toast.success(`Solicitud ${s.folio} revertida a Abierto/Pendiente.`);
-    setDetail(null);
+    revertirMut.mutate(s);
   };
 
   return (

@@ -2,9 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Edit2, Plus, UserCog } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth, useLocalStorage } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
+import { lista, useApiMutation, useRoles, useUsuarios } from "@/lib/queries";
 import { showErrorDialog } from "@/components/ErrorDialog";
-import { KEYS, type Role, type User, uid } from "@/lib/store";
+import type { Role, User } from "@/lib/store";
 import { Modal } from "./_portal.solicitar";
 
 export const Route = createFileRoute("/_portal/usuarios")({
@@ -25,10 +27,28 @@ const ADMIN_LOCK_MSG = "Solo un administrador puede modificar cuentas de adminis
 
 function Usuarios() {
   const { role: myRole, hasPerm } = useAuth();
-  const [users, setUsers] = useLocalStorage<User[]>(KEYS.users, []);
-  const [roles] = useLocalStorage<Role[]>(KEYS.roles, []);
+  const { data: usersData } = useUsuarios();
+  const { data: rolesData } = useRoles();
+  const users = lista(usersData);
+  const roles = lista(rolesData);
   const [edit, setEdit] = useState<User | null>(null);
   const [creating, setCreating] = useState(false);
+
+  const crear = useApiMutation((u: User) => api.post("/usuarios", u), {
+    onSuccess: () => {
+      toast.success("Usuario creado.");
+      setEdit(null);
+      setCreating(false);
+    },
+  });
+  const actualizar = useApiMutation((u: User) => api.put(`/usuarios/${u.id}`, u), {
+    onSuccess: () => {
+      toast.success("Usuario actualizado.");
+      setEdit(null);
+      setCreating(false);
+    },
+  });
+  const cambiarActivo = useApiMutation((u: User) => api.put(`/usuarios/${u.id}`, { ...u, activo: !u.activo, password: "" }));
 
   if (!hasPerm("gestionar_usuarios")) {
     return <div className="ckl-card p-8 text-center text-sm">Sin permiso para acceder.</div>;
@@ -42,7 +62,7 @@ function Usuarios() {
 
   const toggleActive = (u: User) => {
     if (!canModify(u)) return showErrorDialog(ADMIN_LOCK_MSG);
-    setUsers(users.map((x) => (x.id === u.id ? { ...x, activo: !x.activo } : x)));
+    cambiarActivo.mutate(u);
   };
 
   const openEdit = (u: User) => {
@@ -57,13 +77,14 @@ function Usuarios() {
       return;
     }
     if (creating) {
-      setUsers([{ ...u, id: uid("u_") }, ...users]);
-      toast.success("Usuario creado.");
+      if (!u.password) {
+        showErrorDialog("Captura una contraseña para el nuevo usuario.");
+        return;
+      }
+      crear.mutate(u);
     } else {
-      setUsers(users.map((x) => x.id === u.id ? u : x));
-      toast.success("Usuario actualizado.");
+      actualizar.mutate(u);
     }
-    setEdit(null); setCreating(false);
   };
 
   return (
@@ -180,7 +201,7 @@ function UserModal({ user, roles, users, onClose, onSave }: { user: User; roles:
         <div><label className="ckl-label">Nombre</label><input className="ckl-input" value={u.nombre} onChange={(e) => { set("nombre", e.target.value); set("initials", e.target.value.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()); }} /></div>
         <div><label className="ckl-label">Correo</label><input className="ckl-input" value={u.correo} onChange={(e) => set("correo", e.target.value)} /></div>
         <div><label className="ckl-label">RFC</label><input className="ckl-input" value={u.rfc} onChange={(e) => set("rfc", e.target.value)} /></div>
-        <div><label className="ckl-label">Contraseña</label><input className="ckl-input" value={u.password} onChange={(e) => set("password", e.target.value)} /></div>
+        <div><label className="ckl-label">Contraseña</label><input className="ckl-input" value={u.password ?? ""} placeholder={user.id ? "Vacío = no cambiar" : ""} onChange={(e) => set("password", e.target.value)} /></div>
         <div>
           <label className="ckl-label">Rol</label>
           <select className="ckl-input" value={u.rol_id} onChange={(e) => set("rol_id", +e.target.value)}>

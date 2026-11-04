@@ -1,19 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Clock, CheckCircle2, AlertTriangle, FileText, Download, ChevronRight } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { fmtMoney, avanceComprobacion, estatusVisible } from "@/lib/store";
 import {
-  KEYS,
-  lsGet,
-  fmtMoney,
-  filterSolicitudesByOwnership,
-  filterSolicitudesByDateCutoff,
-  avanceComprobacion,
-  estatusVisible,
-  type Solicitud,
-  type Sociedad,
-  type User,
-  type ComprobanteGasto,
-} from "@/lib/store";
+  useSolicitudes,
+  useCatalogos,
+  useUsuarios,
+  useComprobantes,
+  useConfig,
+  lista,
+  CONFIG_DEFAULTS,
+} from "@/lib/queries";
 import { toast } from "sonner";
 import { PanelGastoDashboard } from "@/components/portal/GastoPorConcepto";
 
@@ -163,14 +160,23 @@ function saludoActual(date = new Date()) {
 }
 
 function Dashboard() {
-  const { user, role } = useAuth();
-  const allSolicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
-  const sociedades = lsGet<Sociedad[]>(KEYS.sociedades, []);
-  const users = lsGet<User[]>(KEYS.users, []);
-  const comprobantesGasto = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  const { user } = useAuth();
+  // El servidor ya filtra por alcance del rol. Sin ventana para los KPIs; con ventana
+  // (2-4 meses según el rol) para "atrasadas", igual que la pantalla de Estatus.
+  const { data: solAll } = useSolicitudes(false);
+  const { data: solVentana } = useSolicitudes(true);
+  const { data: catalogos } = useCatalogos();
+  const { data: usuariosData } = useUsuarios();
+  const { data: comprobantesData } = useComprobantes(false);
+  const { data: configData } = useConfig();
+  const solicitudes = lista(solAll);
+  const solicitudesVisiblesEnEstatus = lista(solVentana);
+  const sociedades = lista(catalogos?.sociedades);
+  const users = lista(usuariosData);
+  const comprobantesGasto = lista(comprobantesData);
   const mySoc = sociedades.find((s) => s.nombre === user?.empresa);
-  const config = lsGet<{ dias_comprobacion_atrasada?: number }>(KEYS.config, {});
-  const diasComprobacionAtrasada = config.dias_comprobacion_atrasada ?? 7;
+  const diasComprobacionAtrasada =
+    (configData ?? CONFIG_DEFAULTS).dias_comprobacion_atrasada ?? 7;
 
   // Mismo criterio que usan "Estatus" y "Comprobación": comprobado solo
   // cuando el total comprobado iguala al total solicitado en todos sus
@@ -178,21 +184,11 @@ function Dashboard() {
   const estaComprobado = (solicitudId: string) =>
     avanceComprobacion(comprobantesGasto, solicitudId).completo;
 
-  // Usuario: solo sus propias solicitudes. Jefe inmediato: solo las de su equipo.
-  // Administrador/Finanzas/Compras corporativas (y roles con "ver todo"): todas.
-  const solicitudes = filterSolicitudesByOwnership(user, role, allSolicitudes, users);
-
   const now = new Date();
   const inMonth = (d: string) => {
     const dt = new Date(d);
     return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
   };
-
-  // "Ver comprobaciones atrasadas" lleva a Estatus, que solo muestra folios
-  // dentro de su ventana de fechas visible (2-4 meses según el rol) — se
-  // cuenta con ese mismo límite para que el número coincida con lo que esa
-  // pantalla realmente va a mostrar.
-  const solicitudesVisiblesEnEstatus = filterSolicitudesByDateCutoff(solicitudes, role?.nombre);
 
   const kpis = {
     pendientes: solicitudes.filter((s) => s.jefe_status === "Pendiente").length,

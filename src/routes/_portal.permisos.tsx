@@ -1,8 +1,10 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { useAuth, useLocalStorage } from "@/lib/auth";
-import { KEYS, type Role } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
+import { useApiMutation, useRoles } from "@/lib/queries";
+import type { Role } from "@/lib/store";
 
 export const Route = createFileRoute("/_portal/permisos")({
   head: () => ({ meta: [{ title: "Permisos — CKL" }] }),
@@ -32,8 +34,15 @@ const MODULOS: { key: string; label: string }[] = [
 
 function Permisos() {
   const { hasPerm } = useAuth();
-  const [roles, setRoles] = useLocalStorage<Role[]>(KEYS.roles, []);
-  const [draft, setDraft] = useState<Role[]>(roles);
+  const { data: roles } = useRoles();
+  const [draft, setDraft] = useState<Role[]>([]);
+  useEffect(() => {
+    if (roles) setDraft(roles);
+  }, [roles]);
+  const guardar = useApiMutation(
+    (rs: Role[]) => api.put("/roles/permisos", rs.map((r) => ({ id: r.id, permisos: r.permisos }))),
+    { onSuccess: () => toast.success("Permisos actualizados.") },
+  );
 
   if (!hasPerm("configurar_permisos")) {
     return <div className="ckl-card p-8 text-center text-sm">Sin permiso para acceder.</div>;
@@ -44,8 +53,7 @@ function Permisos() {
   };
 
   const save = () => {
-    setRoles(draft);
-    toast.success("Permisos actualizados.");
+    guardar.mutate(draft);
   };
 
   return (

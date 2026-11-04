@@ -11,13 +11,19 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth, useLocalStorage } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
+import { api } from "@/lib/api";
 import {
-  KEYS,
+  lista,
+  useApiMutation,
+  useComprobantes,
+  useFacturas,
+  useSolicitudes,
+  useUsuarios,
+} from "@/lib/queries";
+import {
   fmtMoney,
-  filterSolicitudesByOwnership,
-  uid,
   avanceComprobacion,
   avanceValidacion,
   agruparFacturas,
@@ -25,8 +31,6 @@ import {
   type Factura,
   type Solicitud,
   type ComprobanteGasto,
-  type Sociedad,
-  type User,
 } from "@/lib/store";
 import {
   SubirComprobanteDialog,
@@ -43,39 +47,17 @@ export const Route = createFileRoute("/_portal/comprobacion")({
   component: Comprobacion,
 });
 
-function readAsDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
-function dataUrlToBlob(dataUrl: string): Blob {
-  const [header, base64] = dataUrl.split(",");
-  const mime = header.match(/:(.*?);/)?.[1] ?? "application/octet-stream";
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mime });
-}
-
-// Chrome bloquea window.open() directo a una URL data: (medida anti-phishing).
-// Se convierte a un Blob URL, que sí se puede abrir/descargar sin problema.
+// El servidor sirve el archivo con su Content-Type: se abre en pestaña nueva.
 function verFactura(f: Factura) {
-  const url = URL.createObjectURL(dataUrlToBlob(f.contenido));
-  window.open(url, "_blank");
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  if (f.url) window.open(f.url, "_blank");
 }
 
 function descargarFactura(f: Factura) {
-  const url = URL.createObjectURL(dataUrlToBlob(f.contenido));
+  if (!f.url) return;
   const a = document.createElement("a");
-  a.href = url;
+  a.href = f.url;
   a.download = f.archivo;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 const RENGLON_BG: Record<string, string> = {
@@ -103,19 +85,21 @@ function Comprobacion() {
   // Comida, Vales) y las secciones de No deducibles/Depósito sobrante no le
   // corresponden.
   const soloAvion = role?.nombre === "gestor_vuelos";
-  const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
-  const [users] = useLocalStorage<User[]>(KEYS.users, []);
-  const [sociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
-  const [comprobantes, setComprobantes] = useLocalStorage<ComprobanteGasto[]>(
-    KEYS.comprobantesGasto,
-    [],
-  );
-  const [facturas, setFacturas] = useLocalStorage<Factura[]>(KEYS.facturasXml, []);
-  // Alcance por rol: el usuario solo ve sus folios; ver_equipo/ver_todo amplían.
+  const { data: solicitudesData, isLoading: cargandoSol } = useSolicitudes(false);
+  const solicitudes = lista(solicitudesData);
+  const { data: usersData } = useUsuarios();
+  const users = lista(usersData);
+  const { data: comprobantesData } = useComprobantes(false);
+  const comprobantes = lista(comprobantesData);
+  // El servidor ya devuelve solo los folios del alcance del rol (sin ventana de fechas).
   // El validador solo ve folios comprobados por completo (los que ya puede revisar).
-  const cerradas = filterSolicitudesByOwnership(user, role, solicitudes, users)
-    .filter((s) => s.estatus === "Cerrado")
-    .filter((s) => !soloValidador || avanceComprobacion(comprobantes, s.id).completo);
+  const cerradas = useMemo(
+    () =>
+      solicitudes
+        .filter((s) => s.estatus === "Cerrado")
+        .filter((s) => !soloValidador || avanceComprobacion(comprobantes, s.id).completo),
+    [solicitudes, comprobantes, soloValidador],
+  );
   const nav = useNavigate();
   const { solicitudId } = Route.useSearch();
   const [sidState, setSid] = useState<string>(() =>
@@ -129,17 +113,13 @@ function Comprobacion() {
       setSid(solicitudId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [solicitudId, solicitudes, users, user, role]);
+  }, [solicitudId, solicitudesData]);
   // Selección manual: actualiza el estado y refleja el folio en la URL (sin apilar historial).
   const selectFolio = (id: string) => {
     setSid(id);
     nav({ to: "/comprobacion", search: { solicitudId: id }, replace: true });
   };
   const sel = cerradas.find((s) => s.id === sid);
-  // Cada usuario factura a la Sociedad (razón social) con la que solicitó el
-  // viático, no a su propio RFC personal — el Receptor del CFDI debe ser esa
-  // sociedad.
-  const solSociedad = sociedades.find((so) => so.nombre === sel?.empresa);
   const rows = useMemo(
     () =>
       comprobantes
@@ -147,12 +127,19 @@ function Comprobacion() {
         .filter((c) => !soloAvion || c.concepto === "Avión"),
     [comprobantes, sid, soloAvion],
   );
-  const fs = useMemo(() => facturas.filter((f) => f.solicitud_id === sid), [facturas, sid]);
+  const { data: facturasData } = useFacturas(sid || null);
+  const fs = lista(facturasData);
   const [log, setLog] = useState<string[]>([]);
 
   const addLog = (line: string) =>
     setLog((l) => [`${new Date().toTimeString().slice(0, 8)} ${line}`, ...l].slice(0, 50));
 
+  const subirMut = useApiMutation((v: { id: string; fd: FormData }) =>
+    api.post<{ renglon: unknown; uuid: string; total: number }>(
+      `/comprobacion/renglones/${v.id}/facturas`,
+      v.fd,
+    ),
+  );
   const [adjuntando, setAdjuntando] = useState<ComprobanteGasto | null>(null);
 
   // Procesa el comprobante de un concepto desde el diálogo "Adjuntar": para los conceptos
@@ -181,136 +168,64 @@ function Comprobacion() {
       }
     }
 
-    const uuidv = uid("UUID-").toUpperCase();
-    let total = Math.floor(Math.random() * 800) + 200; // simulado si el archivo no trae Total
-    if (!esVales && archivos.xml) {
-      const text = await archivos.xml.text();
-      if (!text.includes("cfdi:Emisor") && !text.toLowerCase().includes("emisor")) {
-        addLog("✖ Nodo cfdi:Emisor no encontrado");
-        showErrorDialog("El XML no es un CFDI válido (falta el Emisor). No se guardó el comprobante.");
-        return false;
-      }
-      const rfcMatch = text.match(/Receptor[^>]*Rfc=["']([^"']+)["']/i);
-      const rfcEsperado = solSociedad?.rfc;
-      if (rfcMatch && rfcEsperado && rfcMatch[1].toUpperCase() !== rfcEsperado.toUpperCase()) {
-        addLog(`✖ RFC del Receptor no coincide (esperado: ${rfcEsperado})`);
-        showErrorDialog(
-          `El RFC del receptor del XML no coincide con la sociedad (${rfcEsperado}). No se guardó el comprobante.`,
-        );
-        return false;
-      }
-      // Total del CFDI (atributo Total del Comprobante; SubTotal no coincide por el \s previo)
-      const t = text.match(/\sTotal=["']([0-9][0-9.,]*)["']/i);
-      const leido = t ? parseFloat(t[1].replace(/,/g, "")) : NaN;
-      if (leido > 0) total = leido;
-    }
-
-    const pendiente = concepto.monto_solicitado - concepto.monto_comprobado;
-    const montoAplicado = Math.min(total, pendiente);
-    if (montoAplicado <= 0) {
-      showErrorDialog("Este concepto ya está comprobado por completo.");
+    // El servidor valida Emisor/RFC del receptor, lee el Total y aplica el monto.
+    const fd = new FormData();
+    if (!esVales && archivos.xml) fd.append("xml", archivos.xml);
+    if (archivos.pdf) fd.append("pdf", archivos.pdf);
+    try {
+      const r = await subirMut.mutateAsync({ id: concepto.id, fd });
+      addLog(
+        esVales
+          ? `✔ Comprobante de vales cargado: ${archivos.pdf!.name}`
+          : `✔ XML + PDF verificados para "${concepto.concepto}". UUID: ${r.uuid} · Total ${fmtMoney(r.total)}`,
+      );
+      toast.success(`Comprobante de "${concepto.concepto}" cargado y verificado.`);
+      return true;
+    } catch (e) {
+      addLog(`✖ ${e instanceof Error ? e.message : "No se pudo cargar el comprobante"}`);
       return false;
     }
-
-    const fecha = new Date().toLocaleDateString("es-MX");
-    const parId = esVales ? undefined : uid("par_");
-    const base = { solicitud_id: sid, fecha, uuid: uuidv, total, status: "Verificado" as const, concepto_id: concepto.id, par_id: parId };
-    const nuevas: Factura[] = [];
-    if (!esVales && archivos.xml) {
-      nuevas.push({
-        ...base, id: uid("f_"), tipo: "XML", archivo: archivos.xml.name,
-        monto_aplicado: montoAplicado, contenido: await readAsDataURL(archivos.xml),
-      });
-    }
-    if (archivos.pdf) {
-      nuevas.push({
-        ...base, id: uid("f_"),
-        tipo: esVales && /\.(jpe?g|png)$/i.test(archivos.pdf.name) ? "FOTO" : "PDF",
-        archivo: archivos.pdf.name,
-        monto_aplicado: esVales ? montoAplicado : 0,
-        contenido: await readAsDataURL(archivos.pdf),
-      });
-    }
-    setFacturas([...nuevas, ...facturas]);
-    setComprobantes(
-      comprobantes.map((c) =>
-        c.id === concepto.id
-          ? {
-              ...c,
-              monto_comprobado: c.monto_comprobado + montoAplicado,
-              status_renglon:
-                c.monto_comprobado + montoAplicado >= c.monto_solicitado
-                  ? "comprobado"
-                  : "parcialmente_comprobado",
-            }
-          : c,
-      ),
-    );
-    addLog(
-      esVales
-        ? `✔ Comprobante de vales cargado: ${archivos.pdf!.name}`
-        : `✔ XML + PDF verificados para "${concepto.concepto}". UUID: ${uuidv} · Total ${fmtMoney(total)}`,
-    );
-    toast.success(`Comprobante de "${concepto.concepto}" cargado y verificado.`);
-    return true;
   };
 
   // ── Validación de Compras Corporativas
-  const actualizarRenglon = (id: string, patch: Partial<ComprobanteGasto>) =>
-    setComprobantes(comprobantes.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const validacionMut = useApiMutation(
+    (v: { id: string; body: { validado?: boolean; nota?: string }; msg: string }) =>
+      api.patch(`/comprobacion/renglones/${v.id}/validacion`, v.body),
+    { onSuccess: (_r, v) => toast.success(v.msg) },
+  );
 
   const toggleValidado = (r: ComprobanteGasto) => {
     if (r.validado) {
-      actualizarRenglon(r.id, { validado: false, validado_por: undefined, validado_fecha: undefined });
-      toast.success(`Validación de "${r.concepto}" retirada.`);
-    } else {
-      actualizarRenglon(r.id, {
-        validado: true,
-        validado_por: user?.id,
-        validado_fecha: new Date().toISOString().slice(0, 10),
+      validacionMut.mutate({
+        id: r.id,
+        body: { validado: false },
+        msg: `Validación de "${r.concepto}" retirada.`,
       });
-      toast.success(`"${r.concepto}" validado.`);
+    } else {
+      validacionMut.mutate({ id: r.id, body: { validado: true }, msg: `"${r.concepto}" validado.` });
     }
   };
 
   const guardarNota = (r: ComprobanteGasto, texto: string) => {
     const t = texto.trim();
     if ((r.nota_validacion ?? "") === t) return;
-    actualizarRenglon(r.id, { nota_validacion: t || undefined });
-    toast.success("Nota guardada.");
+    validacionMut.mutate({ id: r.id, body: { nota: t }, msg: "Nota guardada." });
   };
 
-  // Elimina el comprobante completo (XML + PDF) y revierte lo que aplicó al renglón.
-  const removeGrupo = (g: Factura[]) => {
-    const ids = new Set(g.map((f) => f.id));
-    const aplicado = g.reduce((a, f) => a + f.monto_aplicado, 0);
-    const conceptoId = g.find((f) => f.concepto_id)?.concepto_id;
-    setFacturas(facturas.filter((x) => !ids.has(x.id)));
-    if (conceptoId && aplicado > 0) {
-      setComprobantes(
-        comprobantes.map((c) => {
-          if (c.id !== conceptoId) return c;
-          const nuevo = Math.max(0, c.monto_comprobado - aplicado);
-          return {
-            ...c,
-            // Si el renglón deja de estar completo, la validación de Compras ya no aplica.
-            ...(nuevo < c.monto_solicitado
-              ? { validado: false, validado_por: undefined, validado_fecha: undefined }
-              : {}),
-            monto_comprobado: nuevo,
-            status_renglon:
-              nuevo <= 0
-                ? "pendiente"
-                : nuevo >= c.monto_solicitado
-                  ? "comprobado"
-                  : "parcialmente_comprobado",
-          };
-        }),
-      );
-    }
-    toast.success(g.length > 1 ? "Comprobante eliminado (XML y PDF)." : "Archivo eliminado.");
-  };
+  // Elimina el comprobante completo (XML + PDF); el servidor revierte el monto del renglón.
+  const eliminarMut = useApiMutation(
+    (g: Factura[]) => api.del(`/comprobacion/facturas/${g[0].par_id ?? g[0].id}`),
+    {
+      onSuccess: (_r, g) =>
+        toast.success(g.length > 1 ? "Comprobante eliminado (XML y PDF)." : "Archivo eliminado."),
+    },
+  );
+  const removeGrupo = (g: Factura[]) => eliminarMut.mutate(g);
 
+  if (!sel && cargandoSol)
+    return (
+      <div className="ckl-card p-8 text-center text-sm text-muted-foreground">Cargando…</div>
+    );
   if (!sel)
     return (
       <div className="ckl-card p-8 text-center text-sm text-muted-foreground">
