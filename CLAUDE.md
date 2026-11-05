@@ -85,5 +85,6 @@ Don't unwind these layers when debugging a 500 — check `error-capture.ts`'s ca
 ## Conventions
 
 - Prettier: 100-char print width, double quotes (`singleQuote: false`), trailing commas everywhere, semicolons on (see [.prettierrc](.prettierrc)).
-- ESLint disallows importing the `server-only` package; server code lives in `server/` (Express), not in the TanStack Start bundle.
-- `server/` imports types and pure helpers from `src/lib/store.ts` with relative `.ts` paths (run through `tsx`); keep `store.ts` free of browser-only APIs.
+- ESLint disallows importing the `server-only` package — this project uses `*.server.ts` filename suffixes or `@tanstack/react-start/server-only` instead (Next.js convention doesn't apply here).
+- `bunfig.toml` enforces a 24h supply-chain guard (`minimumReleaseAge`) on new package installs; only `@lovable.dev/vite-tanstack-config` is excluded. Confirm with the user before adding new exclusions.
+
