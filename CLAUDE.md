@@ -4,20 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Portal de Viáticos CKL — a Spanish-language expense/travel-request management portal for Grupo Cklass, built with TanStack Start (SSR React). Scaffolded and maintained via Lovable (`@lovable.dev/vite-tanstack-config`); package manager is Bun.
+Portal de Viáticos CKL — a Spanish-language expense/travel-request management portal for Grupo Cklass, built with TanStack Start (SSR React). Originally scaffolded with Lovable but no longer depends on it; package manager is npm (Node 22).
 
 All user-facing text is in Spanish (Mexico). Preserve this when adding pages, labels, toasts, or error messages.
 
+**Read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) before asking the user questions or touching business logic**: it documents the domain rules already decided (approval flow, thresholds, comprobación XML+PDF pairs, Compras validation, convenios, folio blocking, visibility windows, demo users). This file covers only technical architecture and commands.
+
 ## Commands
 
-Package manager is **Bun** (see `bun.lock`, `bunfig.toml`).
+Package manager is **npm** (Node >= 22, see `package-lock.json`).
 
-- `bun run dev` — start the dev server (vite dev)
-- `bun run build` — production build
-- `bun run build:dev` — development-mode build
-- `bun run preview` — preview a production build
-- `bun run lint` — eslint over the whole repo
-- `bun run format` — prettier --write over the whole repo
+- `npm run dev:all` — API (port 3001) + Vite (port 5173) together; use this for day-to-day work
+- `npm run dev` — Vite dev server only (needs the API running for any data)
+- `npm run dev:api` — Express API only (`node --watch`, reads `.env.local`)
+- `npm run start:api` — API without watch (production)
+- `npm run build` — production build
+- `npm run build:dev` — development-mode build
+- `npm run preview` — preview a production build
+- `npm run db:setup` — (re)create the MySQL schema, SPs, triggers and demo data from `db/schema.sql`
+- `npm run db:check` — test the MySQL connection using `.env.local`
+- `npm run lint` — eslint over the whole repo
+- `npm run format` — prettier --write over the whole repo
 
 There is no test suite configured in this repo currently.
 
@@ -25,44 +32,47 @@ There is no test suite configured in this repo currently.
 
 ### Stack
 
-TanStack Start + TanStack Router (file-based routing) + TanStack Query, React 19, Tailwind CSS v4, shadcn/ui (Radix primitives), targeting Cloudflare Workers via nitro. Most Vite plugins (tanstackStart, viteReact, tailwindcss, tsConfigPaths, nitro, componentTagger, VITE_* env injection, `@` path alias, error-logger plugins, sandbox detection) are pre-wired inside `@lovable.dev/vite-tanstack-config` — see the comment header in [vite.config.ts](vite.config.ts) before adding any of those manually, since duplicating them breaks the app.
+TanStack Start + TanStack Router (file-based routing) + TanStack Query, React 19, Tailwind CSS v4, shadcn/ui (Radix primitives), built with nitro for a Node server (`node-server` preset; Node 22). Vite plugins (tanstackStart, viteReact, tailwindcss, tsConfigPaths, and nitro for `build` only) are wired explicitly in [vite.config.ts](vite.config.ts); `tanstackStart` redirects the server entry to `src/server.ts`. In dev Vite proxies `/api` to the Express API; in the built Node server a nitro `routeRules` proxy does the same (`API_PORT`, default 3001). The back end is a separate Express app in [server/](server/) on top of MySQL 8.4.
 
 ### Routing (file-based, TanStack Router)
 
 Every `.tsx` file under `src/routes/` is a route — see [src/routes/README.md](src/routes/README.md) for full conventions. Key points:
 - `__root.tsx` is the only app shell (head tags, `QueryClientProvider`, `AuthProvider`, `Toaster`, not-found/error boundaries). Do not create `src/pages/` or Next/Remix-style layout files.
-- `_portal.tsx` is a layout route: it renders `PortalLayout` (sidebar/topbar shell in [src/components/portal/Layout.tsx](src/components/portal/Layout.tsx)) and wraps all authenticated pages (`_portal.dashboard.tsx`, `_portal.solicitar.tsx`, `_portal.estatus.tsx`, `_portal.comprobacion.tsx`, `_portal.reportes.tsx`, `_portal.usuarios.tsx`, `_portal.permisos.tsx`, `_portal.configuracion.tsx`) via the `_portal.<name>.tsx` flat-file naming convention.
-- `index.tsx` (`/`) redirects to `/dashboard` or `/login` based on presence of the `ckl_user` localStorage key.
+- `_portal.tsx` is a layout route: it renders `PortalLayout` (sidebar/topbar shell in [src/components/portal/Layout.tsx](src/components/portal/Layout.tsx)) and wraps all authenticated pages (`_portal.dashboard.tsx`, `_portal.solicitar.tsx`, `_portal.estatus.tsx`, `_portal.comprobacion.tsx`, `_portal.convenios.tsx`, `_portal.reportes.tsx`, `_portal.usuarios.tsx`, `_portal.permisos.tsx`, `_portal.configuracion.tsx`) via the `_portal.<name>.tsx` flat-file naming convention.
+- `index.tsx` (`/`) redirects to `/dashboard` or `/login` based on `useAuth()` (waits for `cargando`).
 - `routeTree.gen.ts` is auto-generated by the TanStack Router Vite plugin — never edit it by hand.
 
-### Auth & data layer — client-only, localStorage-backed (no backend yet)
+### Auth & data layer — Express API + MySQL (no localStorage anywhere)
 
-There is no real backend/database. All app state is seeded into and read from `localStorage` via [src/lib/store.ts](src/lib/store.ts):
-- `KEYS` enumerates every localStorage key (users, roles, solicitudes, hoteles, sociedades, comprobantes, config, etc.) and `initSeed()` seeds demo data on first load if a key is empty.
-- Domain types (`User`, `Role`, `Solicitud`, `Autorizacion`, `ComprobanteGasto`, `Sociedad`, `Hotel`, ...) are defined here and are the closest thing to a schema in this codebase.
-- `lsGet`/`lsSet` are the read/write primitives; `lsSet` dispatches a `ckl:storage` CustomEvent so other components/hooks re-sync.
-- [src/lib/auth.tsx](src/lib/auth.tsx) provides `AuthProvider`/`useAuth()` (user, role, login/logout, `hasPerm(perm)`) and a generic `useLocalStorage<T>` hook, both reacting to the `ckl:storage`/`storage` events instead of any query invalidation.
-- Demo login accounts (see [src/routes/login.tsx](src/routes/login.tsx)): `admin@cklass.com` / `usuario@cklass.com` / `jefe@cklass.com` / `finanzas@cklass.com`, all with seeded passwords shown on the login screen.
+All state lives in MySQL and is served by the Express API in [server/](server/) (see "API server" below). The front end only talks to `/api`:
+- [src/lib/api.ts](src/lib/api.ts) — `api.get/post/put/patch/del` (fetch with cookies, errors become `ApiError` with the Spanish message from the server; 401s dispatch an `ckl:auth` event) and `reportApiError`.
+- [src/lib/queries.ts](src/lib/queries.ts) — TanStack Query hooks per resource (`useSolicitudes`, `useComprobantes`, `useCatalogos`, `useConfig`, …) and `useApiMutation` (invalidates *all* queries on success and shows API errors via `showErrorDialog`). Lists arrive already filtered by the user's role scope; do not re-filter on the client.
+- [src/lib/auth.tsx](src/lib/auth.tsx) — `AuthProvider`/`useAuth()` (user, role, `cargando`, async `login`/`logout`, `hasPerm`). The session is an httpOnly cookie `ckl_sid`; it is read via `GET /api/auth/me` inside a `useEffect` (keeps SSR hydration intact — don't make it a lazy `useState` initializer) and re-checked every 30 s to detect the "one session per user" rule.
+- [src/lib/store.ts](src/lib/store.ts) — only domain **types** and **pure helpers** now (`fmtMoney`, `tarifaHotel`, `estatusVisible`, `avanceComprobacion`, `evaluarContrasena`, `bloqueoMontoHotel`, `agruparFacturas`, …); the server imports them too. No storage, seeds or backfills.
+- `Solicitud.estatus` stores `Abierto|Cerrado|Rechazado`; the labels shown in the UI (Pendiente/Autorizado/Comprobado) are derived via `estatusVisible()` — never persist the display label.
+- Errors/validations in UI use `showErrorDialog` ([src/components/ErrorDialog.tsx](src/components/ErrorDialog.tsx)); success messages use `toast.success`.
+- Demo accounts (data from `db/schema.sql`): `admin@`, `usuario@`, `jefe@`, `finanzas@`, `gestor@`, `compras@cklass.com`, `usuario2@`, `usuario3@`; passwords are listed in PROJECT_CONTEXT.md and are hashed with scrypt on first login.
 
 ### Roles & permissions
 
-Five roles (`usuario`, `jefe_inmediato`, `gestor_vuelos`, `finanzas`, `administrador`) each carry a flat `permisos: Record<string, boolean>` map (seeded in `store.ts`). Gate UI and route behavior with `useAuth().hasPerm("permiso_key")` or by checking `role.permisos.<key>` directly (see the nav-item filtering in `PortalLayout`) — don't invent a separate authorization scheme.
+Six seeded roles (`usuario`, `jefe_inmediato`, `gestor_vuelos`, `finanzas`, `compras_corporativas`, `administrador`; admins can create more in Configuración, and `Role.nombre` is a plain string) each carry a flat `permisos: Record<string, boolean>` map (seeded in `db/schema.sql`). Gate UI and route behavior with `useAuth().hasPerm("permiso_key")` or by checking `role.permisos.<key>` directly (see the nav-item filtering in `PortalLayout`) — don't invent a separate authorization scheme.
 
-### Server functions
+### API server ([server/](server/), Express 5 + mysql2 + zod)
 
-`src/lib/api/*.functions.ts` holds TanStack Start `createServerFn` handlers (see [src/lib/api/example.functions.ts](src/lib/api/example.functions.ts) for the pattern: `.inputValidator(zodSchema).handler(async ({ data }) => ...)`). There is no Supabase/Edge Functions usage — server logic goes through `createServerFn`, not external functions.
-
-Env-access rules (see comments in [src/lib/config.server.ts](src/lib/config.server.ts)):
-- `*.server.ts` modules: server-only helpers reused across handlers. Cloudflare Workers bind env at request time, so always read `process.env` **inside a function**, never at module scope.
-- Inline `process.env` inside a `createServerFn` handler: fine for one-off reads not reused elsewhere.
-- `import.meta.env.VITE_FOO`: for public config reachable from both client and server (must be defined in `.env` with a `VITE_` prefix). Never put secrets here.
+- Entry [server/index.ts](server/index.ts) (port `API_PORT`, default 3001, run with `tsx --env-file=.env.local`); routers in `server/routes/` (`auth`, `admin` = catálogos/config/roles/usuarios/logs, `solicitudes` = listados + alta/edición + autorización, `comprobacion` = facturas/validación, `compras` = convenios/revisiones/reporte de gasto); business flows in `server/services/` (`solicitudes.ts` guardar, `revisiones.ts` montos manuales de hotel).
+- Auth ([server/auth.ts](server/auth.ts)): cookie `ckl_sid = userId.token`, token stored in table `sesiones` (a new login replaces it → old session gets `401 SESSION_REPLACED`); scrypt password hashes (legacy plaintext demo passwords are re-hashed at first login); `requireAuth` / `requirePerm("clave")` over `roles.permisos`.
+- Scope ([server/scope.ts](server/scope.ts)): `scopeSolicitudes()` builds the SQL for `ver_todo` / `ver_equipo` / own folios plus the 2- or 4-month window (`?ventana=0` disables the window).
+- **Business rules live in MySQL** ([db/schema.sql](db/schema.sql)): stored procedures (`sp_siguiente_folio`, `sp_autorizar_solicitud`, `sp_revertir_autorizaciones`, `sp_folios_sin_comprobar`, `sp_sincronizar_catalogo_convenios`, `sp_dar_baja_convenio`, `sp_reactivar_convenio`, `sp_registrar_log`, …) and triggers (invoice insert/delete applies/reverts `monto_aplicado` on the `comprobantes_gasto` row, `status_renglon` is derived from the amounts, convenio/estatus/revisión changes go to `logs`). Routes call the SPs and **must not re-implement them** (e.g. never add invoice amounts by hand). `SIGNAL SQLSTATE '45000'` messages become `409 {error}` in Spanish ([server/http.ts](server/http.ts)).
+- Response shapes mirror the types in `src/lib/store.ts` ([server/mappers.ts](server/mappers.ts)); `Solicitud.fecha` is `dd/mm/yyyy`, other dates ISO. Invoice files are stored in `factura_archivos` (LONGBLOB) and served at `GET /api/facturas/:id/archivo`.
+- mysql2 returns JSON columns already parsed (don't `JSON.parse` them) and, with our pool options, DATE/DATETIME as strings and DECIMAL as numbers.
+- Env: `DB_HOST/PORT/USER/PASSWORD/NAME`, `API_PORT` in `.env.local` (gitignored; template `.env.example`). `npm run db:setup` runs the whole schema script with the `mysql` client and is **destructive** (drops and recreates every table, reloads demo data); `npm run db:check` tests the connection.
 
 ### SSR error handling
 
 TanStack Start's SSR error handling is deliberately hardened against h3 swallowing thrown errors into a generic 500 JSON response:
 - [src/start.ts](src/start.ts) — `errorMiddleware` wraps all server requests, rendering [src/lib/error-page.ts](src/lib/error-page.ts)'s static HTML on unexpected errors (while rethrowing objects that already carry a `statusCode`).
-- [src/server.ts](src/server.ts) — the Cloudflare Workers entry (`vite.config.ts` redirects the Nitro server entry here). It detects h3's swallowed-500 JSON shape (`{"unhandled":true,"message":"HTTPError"}`) via `normalizeCatastrophicSsrResponse` and recovers the real error from [src/lib/error-capture.ts](src/lib/error-capture.ts)'s out-of-band `error`/`unhandledrejection` listeners, so the true stack still reaches logs.
-- [src/routes/__root.tsx](src/routes/__root.tsx)'s `errorComponent` reports client-side render errors via [src/lib/lovable-error-reporting.ts](src/lib/lovable-error-reporting.ts) (`reportLovableError`, which forwards to `window.__lovableEvents.captureException` when present — a Lovable platform hook, safe no-op otherwise).
+- [src/server.ts](src/server.ts) — the server entry (`vite.config.ts` redirects the Nitro server entry here). It detects h3's swallowed-500 JSON shape (`{"unhandled":true,"message":"HTTPError"}`) via `normalizeCatastrophicSsrResponse` and recovers the real error from [src/lib/error-capture.ts](src/lib/error-capture.ts)'s out-of-band `error`/`unhandledrejection` listeners, so the true stack still reaches logs.
+- [src/routes/__root.tsx](src/routes/__root.tsx)'s `errorComponent` logs client-side render errors to the console.
 
 Don't unwind these layers when debugging a 500 — check `error-capture.ts`'s captured error first.
 

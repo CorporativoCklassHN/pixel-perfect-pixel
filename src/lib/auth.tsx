@@ -1,99 +1,110 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { KEYS, lsGet, lsSet, initSeed, findUserByIdentifier, uid, type Role, type User, type SessionInfo } from "./store";
+import { useQueryClient } from "@tanstack/react-query";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+
 import { showErrorDialog } from "@/components/ErrorDialog";
+
+import { api, ApiError, AUTH_EVENT, type AuthEventDetail } from "./api";
+import { POLL_MS } from "./queries";
+import type { Role, User } from "./store";
 
 type AuthCtx = {
   user: User | null;
   role: Role | null;
-  // true hasta que se leyó la sesión guardada (primer render en el cliente).
+  // true hasta que se consultó la sesión en el servidor (primer render en el cliente).
   cargando: boolean;
-  login: (identifier: string, password: string) => boolean;
-  logout: () => void;
-  refresh: () => void;
+  login: (identifier: string, password: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  refresh: () => Promise<void>;
   hasPerm: (perm: string) => boolean;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
 
+type Me = { user: User; role: Role };
+type MeResp = { user: User | null; role: Role | null };
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // La sesión se lee de localStorage en un efecto (no en el inicializador de useState):
-  // el servidor renderiza sin sesión y leerla síncronamente en el cliente rompería la
-  // hidratación. `cargando` evita que el layout redirija a /login en ese primer render
-  // (antes un F5 o una URL directa siempre terminaban en el Dashboard).
+  // La sesión vive en el servidor (cookie httpOnly + tabla `sesiones`). Se consulta en un efecto,
+  // no en el inicializador de useState: el servidor SSR renderiza sin sesión y leerla síncronamente
+  // en el cliente rompería la hidratación. `cargando` evita redirigir a /login en ese primer render.
+  const qc = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [cargando, setCargando] = useState(true);
-  // La sesión (token) que esta pestaña considera "propia". Si en localStorage
-  // aparece un token distinto para el mismo usuario, significa que se inició
-  // sesión en otro lugar con esa misma cuenta y esta pestaña debe cerrarse.
-  const sessionRef = useRef<SessionInfo | null>(null);
+  const hayUsuario = useRef(false);
 
-  const refresh = () => {
-    const u = lsGet<User | null>(KEYS.user, null);
-    setUser(u);
-    if (u) {
-      const roles = lsGet<Role[]>(KEYS.roles, []);
-      setRole(roles.find((r) => r.id === u.rol_id) ?? null);
-    } else {
-      setRole(null);
-    }
-  };
-
-  useEffect(() => {
-    initSeed();
-    refresh();
-    setCargando(false);
-    // Al montar (recarga de página), adopta la sesión ya guardada como propia.
-    const u = lsGet<User | null>(KEYS.user, null);
-    const sess = lsGet<SessionInfo | null>(KEYS.session, null);
-    if (u && sess && sess.userId === u.id) sessionRef.current = sess;
-
-    const onStorage = () => {
-      const mine = sessionRef.current;
-      if (mine) {
-        const current = lsGet<SessionInfo | null>(KEYS.session, null);
-        if (current && current.userId === mine.userId && current.token !== mine.token) {
-          sessionRef.current = null;
-          window.localStorage.removeItem(KEYS.user);
-          setUser(null);
-          setRole(null);
-          showErrorDialog("Tu sesión se cerró porque este usuario inició sesión en otro lugar.");
-          return;
-        }
-      }
-      refresh();
-    };
-    window.addEventListener("ckl:storage", onStorage);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener("ckl:storage", onStorage);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
-
-  const login = (identifier: string, password: string): boolean => {
-    const u = findUserByIdentifier(identifier);
-    if (!u || u.password !== password || !u.activo) return false;
-    // Genera el token ANTES de escribirlo: lsSet dispara el evento ckl:storage de
-    // forma síncrona incluso en esta misma pestaña, así que la ref ya debe
-    // coincidir para no auto-cerrar la sesión que se acaba de abrir.
-    const session: SessionInfo = { userId: u.id, token: uid("sess_") };
-    sessionRef.current = session;
-    lsSet(KEYS.session, session);
-    lsSet(KEYS.user, u);
-    refresh();
-    return true;
-  };
-
-  const logout = () => {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(KEYS.user);
-      window.localStorage.removeItem(KEYS.session);
-      window.dispatchEvent(new CustomEvent("ckl:storage", { detail: { key: KEYS.user } }));
-    }
-    sessionRef.current = null;
+  const limpiar = useCallback(() => {
+    hayUsuario.current = false;
     setUser(null);
     setRole(null);
+    qc.clear();
+  }, [qc]);
+
+  const aplicar = useCallback((me: Me | null) => {
+    hayUsuario.current = !!me;
+    setUser(me?.user ?? null);
+    setRole(me?.role ?? null);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      const r = await api.get<MeResp>("/auth/me");
+      if (!r.user && hayUsuario.current) limpiar();
+      else aplicar(r.user && r.role ? { user: r.user, role: r.role } : null);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "SESSION_REPLACED" && hayUsuario.current) {
+        limpiar();
+        showErrorDialog(e.message);
+        return;
+      }
+      if (e instanceof ApiError && e.status === 401) {
+        if (hayUsuario.current) limpiar();
+        else aplicar(null);
+      }
+      // Errores de red: se conserva la sesión mostrada.
+    }
+  }, [aplicar, limpiar]);
+
+  useEffect(() => {
+    void refresh().finally(() => setCargando(false));
+    const onAuth = (e: Event) => {
+      const reason = (e as CustomEvent<AuthEventDetail>).detail?.reason;
+      if (!hayUsuario.current) return;
+      limpiar();
+      if (reason === "session_replaced") {
+        showErrorDialog("Tu sesión se cerró porque este usuario inició sesión en otro lugar.");
+      }
+    };
+    window.addEventListener(AUTH_EVENT, onAuth);
+    // Detecta el cierre por "sesión única" aunque el usuario no esté navegando.
+    const t = window.setInterval(() => {
+      if (hayUsuario.current) void refresh();
+    }, POLL_MS);
+    return () => {
+      window.removeEventListener(AUTH_EVENT, onAuth);
+      window.clearInterval(t);
+    };
+  }, [refresh, limpiar]);
+
+  const login = async (identifier: string, password: string): Promise<boolean> => {
+    try {
+      const me = await api.post<Me>("/auth/login", { identifier, password });
+      qc.clear();
+      aplicar(me);
+      return true;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return false;
+      throw e;
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      // Aunque falle la red, se cierra la sesión local.
+    }
+    limpiar();
   };
 
   const hasPerm = (perm: string) => !!role?.permisos[perm];
@@ -105,26 +116,4 @@ export function useAuth() {
   const c = useContext(Ctx);
   if (!c) throw new Error("useAuth outside provider");
   return c;
-}
-
-export function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T) => void] {
-  const [val, setVal] = useState<T>(() => lsGet<T>(key, defaultValue));
-  useEffect(() => {
-    const onStorage = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (!detail || detail.key === key) setVal(lsGet<T>(key, defaultValue));
-    };
-    window.addEventListener("ckl:storage", onStorage);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener("ckl:storage", onStorage);
-      window.removeEventListener("storage", onStorage);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  const update = (v: T) => {
-    lsSet(key, v);
-    setVal(v);
-  };
-  return [val, update];
 }

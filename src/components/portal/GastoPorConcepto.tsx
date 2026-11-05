@@ -3,18 +3,13 @@ import { Link } from "@tanstack/react-router";
 import { ChevronRight, FileSpreadsheet } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
-import { useAuth, useLocalStorage } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
+import { lista, useCatalogos, useRenglonesGasto as useRenglonesApi, useUsuarios } from "@/lib/queries";
 import {
   CATEGORIAS_GASTO,
-  KEYS,
   fmtMoney,
-  renglonesGasto,
   type CategoriaGasto,
-  type ComprobanteGasto,
   type RenglonGasto,
-  type Sociedad,
-  type Solicitud,
-  type User,
 } from "@/lib/store";
 
 // Un color por concepto, en orden fijo (nunca se reasigna por monto). Paleta categórica
@@ -32,18 +27,11 @@ const COLOR_CATEGORIA: Record<CategoriaGasto, string> = {
 const pct = (parte: number, total: number) => (total > 0 ? (parte / total) * 100 : 0);
 const pct1 = (n: number) => `${n.toFixed(1)}%`;
 
-// Renglones de gasto (todas las solicitudes no rechazadas) a partir de los datos guardados.
+// Renglones de gasto (todas las solicitudes no rechazadas), calculados por el servidor.
 function useRenglonesGasto(): RenglonGasto[] {
-  const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
-  const [comprobantes] = useLocalStorage<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
-  const [destinos] = useLocalStorage<{ solicitud_id: string; automovil?: { gasolina?: number } }[]>(
-    KEYS.destinos,
-    [],
-  );
-  return useMemo(
-    () => renglonesGasto(solicitudes, comprobantes, destinos),
-    [solicitudes, comprobantes, destinos],
-  );
+  const { hasPerm } = useAuth();
+  const { data } = useRenglonesApi(hasPerm("ver_gasto_por_concepto"));
+  return lista(data);
 }
 
 function totalesPorCategoria(rs: RenglonGasto[], base: "solicitado" | "comprobado") {
@@ -260,8 +248,8 @@ const AGRUPACIONES: { v: Agrupacion; t: string; cols: string[] }[] = [
 
 export function ReporteGasto() {
   const renglones = useRenglonesGasto();
-  const [users] = useLocalStorage<User[]>(KEYS.users, []);
-  const [sociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
+  const users = lista(useUsuarios().data);
+  const sociedades = lista(useCatalogos().data?.sociedades);
   const [fi, setFi] = useState("");
   const [ff, setFf] = useState("");
   const [soc, setSoc] = useState("Todas");

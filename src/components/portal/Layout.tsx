@@ -5,15 +5,7 @@ import {
   Users, ShieldCheck, Settings, Menu, Plus, X, Handshake,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import {
-  KEYS,
-  lsGet,
-  bloqueoNuevaSolicitud,
-  filterSolicitudesByDateCutoff,
-  filterSolicitudesByOwnership,
-  type Solicitud,
-  type User,
-} from "@/lib/store";
+import { lista, useBloqueoNuevaSolicitud, useSolicitudes } from "@/lib/queries";
 import { showErrorDialog } from "@/components/ErrorDialog";
 import { UserMenu } from "@/components/portal/UserMenu";
 import { NotificationBell } from "@/components/portal/NotificationBell";
@@ -31,14 +23,14 @@ export function PortalLayout() {
     if (!cargando && !user) nav({ to: "/login" });
   }, [cargando, user, nav]);
 
-  if (cargando || !user || !role) return null;
+  const sesion = !cargando && !!user && !!role;
+  // El servidor ya devuelve solo lo que este usuario puede ver en Estatus.
+  const { data: solData } = useSolicitudes(true, { poll: true });
+  const { data: bloqueoData } = useBloqueoNuevaSolicitud(sesion);
 
-  const solicitudes = lsGet<Solicitud[]>(KEYS.solicitudes, []);
-  // El contador de Estatus cuenta solo lo que este usuario puede ver en esa pantalla.
-  const abiertos = filterSolicitudesByDateCutoff(
-    filterSolicitudesByOwnership(user, role, solicitudes, lsGet<User[]>(KEYS.users, [])),
-    role.nombre,
-  ).filter((s) => s.estatus === "Abierto").length;
+  if (!sesion || !user || !role) return null;
+
+  const abiertos = lista(solData).filter((s) => s.estatus === "Abierto").length;
 
   const items: Item[] = [
     { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, section: "General" },
@@ -147,7 +139,7 @@ export function PortalLayout() {
               onClick={() => {
                 // Con 2 o más folios autorizados sin comprobar por completo no se
                 // puede generar una solicitud nueva.
-                const bloqueo = bloqueoNuevaSolicitud(user.id);
+                const bloqueo = bloqueoData?.mensaje;
                 if (bloqueo) return showErrorDialog(bloqueo);
                 nav({ to: "/solicitar" });
               }}

@@ -4,19 +4,22 @@ Documento de contexto para Claude. Complementa a `CLAUDE.md` (arquitectura técn
 
 ## 1. Qué es
 
-Portal web (en español de México) para que empleados de Grupo Cklass **soliciten viáticos**, un jefe/Finanzas los **autoricen**, y el empleado los **compruebe** con facturas (XML CFDI / PDF). Es un **prototipo frontend sin backend**: todo vive en `localStorage` con datos demo sembrados. Proyecto originado en Lovable; se itera en local con Claude Code.
+Portal web (en español de México) para que empleados de Grupo Cklass **soliciten viáticos**, un jefe/Finanzas los **autoricen**, y el empleado los **compruebe** con facturas (XML CFDI / PDF). Front-end React + **API Node.js (Express, `server/`) sobre MySQL 8.4**: ya no se usa `localStorage`; los datos demo vienen de `db/schema.sql` (`npm run db:setup`). Proyecto originado en Lovable, ya desacoplado de él; se itera en local con Claude Code.
 
-- Stack: TanStack Start + Router (rutas por archivo), React 19, Tailwind v4, shadcn/ui, Bun. Destino de despliegue: Cloudflare Workers (nitro).
+- Stack: TanStack Start + Router (rutas por archivo), React 19, Tailwind v4, shadcn/ui, Node 22 + npm. Despliegue: servidor Node 22 (nitro `node-server`); MySQL 8.4 vía `mysql2` (ver `.env.example`, `npm run db:check`; esquema completo con SPs, triggers y datos demo en `db/schema.sql` → `npm run db:setup`, destructivo).
 - **Todo texto visible al usuario va en español (MX)**: labels, toasts, errores, placeholders. Fechas `dd/mm/yyyy`, montos con `fmtMoney` (`$1,234`, sin decimales).
 - Fuente: Jost. Color de marca primario `#E30613` (rojo CKL). Clases propias `ckl-btn-primary`, `ckl-btn-outline`, `ckl-btn-ghost`, `ckl-input`, `ckl-label`, `ckl-card`, `ckl-badge`: reutilízalas.
-- No hay tests ni backend. Validación = `bun run lint`, `bun run build` y probar en navegador (`bun run dev`).
+- No hay tests ni backend. Validación = `npm run lint`, `npm run build` y probar en navegador (`npm run dev:all`).
 
 ## 2. Mapa de archivos relevantes
 
 | Archivo | Qué contiene |
 |---|---|
-| `src/lib/store.ts` | **Fuente de verdad**: tipos (`User`, `Role`, `Solicitud`, `Autorizacion`, `ComprobanteGasto`, `Sociedad`, `Hotel`…), `KEYS` de localStorage, datos semilla, `lsGet/lsSet`, `nextFolio`, `fmtMoney`, reset de contraseña, filtros de visibilidad por rol/fecha |
-| `src/lib/auth.tsx` | `AuthProvider`, `useAuth()` (`user`, `role`, `cargando`, `login`, `logout`, `hasPerm`), `useLocalStorage<T>` |
+| `src/lib/store.ts` | Tipos del dominio (`User`, `Role`, `Solicitud`, `Autorizacion`, `ComprobanteGasto`, `Sociedad`, `Hotel`, `Convenio`…) y **funciones puras** (`fmtMoney`, `tarifaHotel`, `estatusVisible`, `avanceComprobacion`, `evaluarContrasena`, `bloqueoMontoHotel`…). Ya no guarda datos |
+| `src/lib/api.ts`, `src/lib/queries.ts` | Cliente HTTP de la API y hooks de TanStack Query (`useSolicitudes`, `useApiMutation`…) |
+| `server/` | API Express: rutas, auth por cookie, alcance por rol y servicios (guardar solicitud, montos manuales); las reglas viven en los SPs/triggers de `db/schema.sql` |
+| `db/schema.sql` | Esquema MySQL completo (tablas, vista, SPs, triggers) + datos demo; `npm run db:setup` |
+| `src/lib/auth.tsx` | `AuthProvider`, `useAuth()` (`user`, `role`, `cargando`, `login`, `logout`, `hasPerm`); la sesión es una cookie httpOnly validada con `GET /api/auth/me` |
 | `src/components/portal/Layout.tsx` | Sidebar/topbar y filtrado del menú por permisos; botón “Nueva solicitud” (fondo blanco, borde/texto rojo) con la validación de folios pendientes |
 | `src/components/portal/UserMenu.tsx` | Menú de usuario del encabezado (nombre + rol → Cerrar sesión / Cambiar contraseña) y el diálogo “Configuración de seguridad” |
 | `src/components/ErrorDialog.tsx` | `showErrorDialog(msg)`: diálogo centrado bloqueante para **errores y validaciones** (se reemplazó el toast de error). Los éxitos siguen usando `toast.success` (sonner) |
@@ -32,21 +35,22 @@ Portal web (en español de México) para que empleados de Grupo Cklass **solicit
 | `src/routeTree.gen.ts` | Autogenerado: **no editar** |
 | `src/components/ui/*` | shadcn vendorizado: no reescribir |
 
-Archivos sin trackear en git que **no son parte del proyecto** (ignorar, no commitear): `package-lock.json` (se usa Bun, `bun.lock`), `src/_NO_imagen-inicio.png`.
+Archivos sin trackear en git que **no son parte del proyecto** (ignorar, no commitear): `src/_NO_imagen-inicio.png`.
 
 ## 3. Datos y persistencia
 
-Claves en `localStorage` (`KEYS` en `store.ts`): `ckl_user`, `ckl_users`, `ckl_roles`, `ckl_solicitudes`, `ckl_destinos`, `ckl_autorizaciones`, `ckl_comprobantes_gasto`, `ckl_facturas_xml`, `ckl_sociedades`, `ckl_hoteles`, `ckl_origenes`, `ckl_config`, `ckl_prealtas`, `ckl_reset_codes`, `ckl_session`, `ckl_revisiones_monto`, `ckl_convenios`, `ckl_correos`, `ckl_logs` (+ `ckl_gastos`, `ckl_notas`, `ckl_comprobantes_viaje` reservadas).
+Todo vive en **MySQL 8.4** (`portal_viaticos`, esquema en `db/schema.sql`) y se accede **solo** a través de la API Express (`/api`). No hay `localStorage`.
 
-- `initSeed()` siembra **solo claves vacías**. Si cambias la semilla en `store.ts`, un navegador que ya tenga datos **no la verá** hasta limpiar localStorage (DevTools → Application → Clear, o borrar las claves `ckl_*`). Recuérdalo al depurar “no aparece mi dato nuevo”.
-- Escribe siempre con `lsSet` (dispara el evento `ckl:storage` que re-sincroniza hooks). Evita `localStorage.setItem` directo.
-- Si cambias la forma de un dato guardado, **tolera el esquema viejo** (ver `normalizeDestino` en `solicitar`) porque el usuario tiene datos persistidos.
-- Las facturas guardan el archivo como data URL base64 en localStorage (límite ~5 MB del navegador). Para abrirlas se convierte a Blob URL (Chrome bloquea `window.open` a `data:`).
-- Sin backend real: no hay correo real (el código de recuperación se muestra en pantalla como “correo simulado”), ni validación SAT real (el total de la factura se simula con un número aleatorio 200–999; el XML solo se revisa por nodo `Emisor` y RFC del `Receptor`).
+- Tablas principales: `solicitudes`, `solicitud_destinos` (+ `destino_hoteles`, `destino_transportes`, `destino_vales`), `autorizaciones`, `comprobantes_gasto`, `facturas` + `factura_archivos` (LONGBLOB), `convenios`, `hoteles`, `sociedades`, `roles` (permisos en JSON), `usuarios`, `sesiones`, `configuracion` (clave/valor JSON), `revisiones_monto`, `correos`, `logs`, `reset_codes`, `prealtas`.
+- Las **reglas de negocio** están en SPs y triggers (autorizar, revertir, folio consecutivo, aplicar/revertir monto de facturas, estatus del renglón, bitácora, sincronización convenios → hoteles). La API los llama; no los dupliques en Node ni en el front.
+- Cambios de esquema o de datos demo: edita `db/schema.sql` y corre `npm run db:setup` (destructivo: borra y recrea todo).
+- Las contraseñas demo están en claro en el script y la API las convierte a hash scrypt en el primer login.
+- Los archivos de comprobantes se abren con `Factura.url` (`GET /api/facturas/:id/archivo`).
+- Sin servidor de correo: el código de recuperación se muestra en pantalla ("correo simulado") y los correos de Compras se registran en `correos`; la validación del CFDI es solo local (Emisor, RFC del Receptor y `Total`; si el XML no trae Total se simula un monto 200–999).
 
 ### Modelo principal
-- `Solicitud`: `folio` (`#0041`…, lo asigna `nextFolio()` **al guardar**, no al abrir el formulario), `jefe_status` (`Pendiente|Autorizado|Rechazado`), `finanzas_status` (`Pendiente|Autorizado|Rechazado|N/A`), `estatus` (`Abierto|Cerrado|Rechazado`), `monto_total`, `empresa` (nombre de sociedad), `created_at` ISO.
-- Destinos (`ckl_destinos`, ligados por `solicitud_id`): `estado`, fechas, `hoteles[]` (estancias con `monto` = **tarifa por noche**, `manual`, `hotel_id`), `foraneo[]`, `local[]`, `otros[]`.
+- `Solicitud`: `folio` (`#0041`…, lo asigna `sp_siguiente_folio` **al guardar**, no al abrir el formulario), `jefe_status` (`Pendiente|Autorizado|Rechazado`), `finanzas_status` (`Pendiente|Autorizado|Rechazado|N/A`), `estatus` (`Abierto|Cerrado|Rechazado`), `monto_total`, `empresa` (nombre de sociedad), `created_at` ISO.
+- Destinos (`solicitud_destinos` y tablas hijas, ligados por `solicitud_id`): `estado`, fechas, `hoteles[]` (estancias con `monto` = **tarifa por noche**, `manual`, `hotel_id`), `foraneo[]`, `local[]`, `otros[]`.
 - `ComprobanteGasto`: un renglón por concepto de cada solicitud (`monto_solicitado`, `monto_comprobado`, `status_renglon`).
 - `Factura` (tipo local en `comprobacion.tsx`): archivo cargado, ligado a un `concepto_id` y `monto_aplicado` (permite revertir exacto al eliminar).
 
@@ -68,7 +72,7 @@ Reglas de UI ya decididas:
 - Alcance de datos (`filterSolicitudesByOwnership`): `ver_todo` ve todo; `ver_equipo` ve a los usuarios con `jefe_id === user.id` **más sus propios folios**; el resto, solo lo propio.
 - Ventana de visibilidad (`filterSolicitudesByDateCutoff`): admin/finanzas/compras/jefe ven **4 meses** atrás; los demás **2 meses**.
 - **Estatus aplica ese alcance** (y el contador del menú lateral también): el `usuario` ve solo sus folios; el `jefe_inmediato` ve los de quienes lo tienen como jefe **y los suyos** (los suyos los autoriza su propio jefe, no él); `ver_todo` (admin, finanzas, compras, gestor) ve todo. Orden: más reciente primero (`created_at` desc, empate por folio desc). Filtros: Buscar, **Usuario** (solo aparece si el alcance incluye a más de una persona; lista a quienes tienen folios visibles) y Estatus.
-- **Sesión única por usuario**: iniciar sesión en otra pestaña/dispositivo cierra la anterior (token en `ckl_session`).
+- **Sesión única por usuario**: iniciar sesión en otra pestaña/dispositivo cierra la anterior (token en la tabla `sesiones`).
 - **Recarga (F5) / URL directa**: la sesión se lee en un `useEffect` (no en el inicializador de `useState`: leerla síncronamente rompe la hidratación SSR). `AuthProvider` expone `cargando` (true hasta leerla) y `PortalLayout` no redirige a `/login` mientras `cargando`. No cambies esto a inicialización lazy.
 
 Usuarios demo (todos `@cklass.com`; contraseña visible en la pantalla de login):
@@ -110,10 +114,10 @@ Sociedades: WATA GROUP, INTERMEDIARIA INTERMEX, TRANSPORTES DE PERSONAL Y MERCAN
 - Paso **jefe**: lo da quien tenga `autorizar_lte5000` y `jefe_status === Pendiente`, **sin importar el monto** (el umbral solo decide si hace falta además Finanzas; antes de corregirlo había un deadlock).
 - Paso **finanzas**: `autorizar_gt5000`, monto > umbral, jefe ya autorizó, finanzas pendiente.
 - La solicitud pasa a `Cerrado` cuando queda autorizada por todos los pasos requeridos. “Cerrado” significa **autorizada y lista para comprobar** (no “terminada”).
-- **Etiqueta visible vs. valor guardado**: `Solicitud.estatus` en localStorage sigue siendo `Abierto|Cerrado|Rechazado` (retrocompatibilidad); la UI muestra `Pendiente` (Abierto), `Rechazado`, `Autorizado` (Cerrado sin comprobar por completo, badge azul) o `Comprobado` (Cerrado y comprobado, verde). Se deriva con `estatusVisible()` + `avanceComprobacion()` de `store.ts` y el componente `StatusBadge` (`comprobado` prop). El filtro de Estatus y el Excel de Reportes usan las etiquetas visibles. **Nunca escribas la etiqueta visible en localStorage.**
+- **Etiqueta visible vs. valor guardado**: `Solicitud.estatus` en la BD sigue siendo `Abierto|Cerrado|Rechazado` (retrocompatibilidad); la UI muestra `Pendiente` (Abierto), `Rechazado`, `Autorizado` (Cerrado sin comprobar por completo, badge azul) o `Comprobado` (Cerrado y comprobado, verde). Se deriva con `estatusVisible()` + `avanceComprobacion()` de `store.ts` y el componente `StatusBadge` (`comprobado` prop). El filtro de Estatus y el Excel de Reportes usan las etiquetas visibles. **Nunca escribas la etiqueta visible en localStorage.**
 - El modal de detalle trae el botón **Comprobar gastos** (folio Cerrado, rol con `comprobar`, no admin) que navega a `/comprobacion?solicitudId=<id>`.
 - Rechazo: exige nota; marca el paso correspondiente y `estatus: Rechazado`.
-- Admin puede **revertir** autorizaciones (borra `ckl_autorizaciones` de ese folio y regresa a Abierto/Pendiente).
+- Admin puede **revertir** autorizaciones (`sp_revertir_autorizaciones`: borra las autorizaciones de ese folio y regresa a Abierto/Pendiente).
 - Eliminar solo si no tiene autorizaciones. El modal de detalle muestra el desglose completo (hoteles, transportes, otros) para quien autoriza.
 
 ### Comprobación
@@ -155,11 +159,11 @@ El encabezado muestra avatar + nombre + rol (`UserMenu`); al hacer clic: Cerrar 
 El banner de comprobaciones atrasadas abre con saludo por hora (“Buenos días / Buenas tardes / Buenas noches {nombre}, tienes N comprobaciones atrasadas…”). Solo aparece si hay atrasadas.
 
 ### Pre-Registro y contraseñas
-Desde el login, un empleado envía un Pre-Registro (`ckl_prealtas`) que el admin procesa en Usuarios. (Se llamaba “Pre-Alta”; la etiqueta correcta de UI es **Pre-Registro**.) Recuperación: código de 6 dígitos válido 10 min, mostrado en pantalla.
+Desde el login, un empleado envía un Pre-Registro (tabla `prealtas`) que el admin procesa en Usuarios. (Se llamaba “Pre-Alta”; la etiqueta correcta de UI es **Pre-Registro**.) Recuperación: código de 6 dígitos válido 10 min, mostrado en pantalla.
 
 ## 5b. Meta: base de datos MySQL y la hoja de pagos actual
 
-El prototipo guarda todo en localStorage. La meta es conectar **MySQL** (hay MySQL Server 8.0.46 en el equipo de desarrollo) y **recuperar de ahí la información que hoy se lleva a mano en una hoja de Excel de pagos a hoteles**, con riesgo de errores humanos. Cada fila de esa hoja es un **pago a un hotel por una estancia**. Mapeo columna → modelo actual:
+La aplicación ya persiste en **MySQL 8.4** (ver sección 3). La meta siguiente es **recuperar de ahí la información que hoy se lleva a mano en una hoja de Excel de pagos a hoteles**, con riesgo de errores humanos. Cada fila de esa hoja es un **pago a un hotel por una estancia**. Mapeo columna → modelo actual:
 
 | Columna de la hoja | Dónde está hoy | Estado |
 |---|---|---|
@@ -184,11 +188,11 @@ Tablas previstas: `sociedades`, `usuarios` (+depto), `roles`/`permisos`, `solici
 
 - Prettier: 100 columnas, comillas dobles, comas finales, `;`. Alias `@/*` → `src/*`. Estilo del código existente: comentarios en español explicando el **porqué**.
 - Errores/validaciones → `showErrorDialog`; confirmaciones de éxito → `toast.success`.
-- No añadas dependencias sin avisar (`bunfig.toml` impone `minimumReleaseAge` de 24 h). Gestor de paquetes: Bun, no npm.
+- No añadas dependencias sin avisar Gestor de paquetes: npm (`package-lock.json`).
 - No toques `routeTree.gen.ts`, `src/components/ui/*`, ni las capas de error SSR (`start.ts`, `server.ts`, `error-capture.ts`).
 - Para nuevas pantallas: archivo `src/routes/_portal.<nombre>.tsx`, `createFileRoute("/_portal/<nombre>")`, título `"<Nombre> — CKL"`, agregar al arreglo `items` de `Layout.tsx` con su permiso.
 - Diseño responsive: tablas con más de 6 columnas se muestran como **tarjetas apiladas por debajo de 768 px** (patrón: `<ul className="md:hidden">` con tarjetas + `<div className="hidden md:block overflow-x-auto">` con la tabla); ya aplicado en Estatus, Reportes, Usuarios y Facturas cargadas. En Estatus móvil cada tarjeta tiene botón de ojo “Ver” (el doble toque dispara zoom nativo, por eso no se usa en móvil). Verifica ancho ~400 px al tocar layouts.
-- Validación: no hay tests. `tsc`/eslint (sin reglas de formato: el repo ya trae cientos de errores de Prettier) y pruebas con Playwright contra `bun run dev` (puerto 8080). **No ejecutar ni mencionar `bun run build`** salvo que la usuaria lo pida (falla en este equipo con “Could not resolve entry module index.html”, también en el commit original; ya se investigó).
+- Validación: no hay tests. `tsc`/eslint (sin reglas de formato: el repo ya trae cientos de errores de Prettier) y pruebas con Playwright contra `npm run dev` (puerto 8080). `npm run build` funciona tras desacoplar de Lovable (antes fallaba con “Could not resolve entry module index.html”).
 - Git: rama `main`; commits en inglés, descriptivos y en imperativo (ver `git log`). No hagas commit/push salvo que se pida.
 
 ## 7. Historial reciente (para entender el estado actual)
@@ -199,5 +203,5 @@ Tablas previstas: `sociedades`, `usuarios` (+depto), `roles`/`permisos`, `solici
 
 - Si una tarea es ambigua **en el dominio**, primero revisa este documento y el código (`store.ts` y la ruta relevante) antes de preguntar.
 - Antes de modificar reglas de negocio de la sección 5, confirma con el usuario; son decisiones tomadas a propósito.
-- Al cambiar semilla o forma de datos, indica si hay que limpiar `localStorage` para verlo.
+- Al cambiar el esquema o los datos demo, recuerda que hay que correr `npm run db:setup` para verlos.
 - Reporta con honestidad qué probaste: no hay tests, así que di si solo corriste lint/build o si verificaste en el navegador.

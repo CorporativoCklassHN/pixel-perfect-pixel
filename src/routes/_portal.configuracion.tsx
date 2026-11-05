@@ -1,18 +1,23 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Edit2, Plus, X, Mail } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth, useLocalStorage } from "@/lib/auth";
-import { showErrorDialog } from "@/components/ErrorDialog";
+import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import {
-  KEYS,
-  registrarLog,
-  type Sociedad,
-  type Role,
-  type User,
-  type CorreoSimulado,
-  type LogEvento,
-} from "@/lib/store";
+  CONFIG_DEFAULTS,
+  lista,
+  useApiMutation,
+  useCatalogos,
+  useConfig,
+  useCorreos,
+  useLogs,
+  useRoles,
+  useUsuarios,
+  type Config,
+} from "@/lib/queries";
+import { showErrorDialog } from "@/components/ErrorDialog";
+import type { Sociedad, Role, CorreoSimulado } from "@/lib/store";
 import { Switch } from "@/components/ui/switch";
 import { Modal } from "./_portal.solicitar";
 
@@ -36,53 +41,13 @@ export const Route = createFileRoute("/_portal/configuracion")({
   component: Configuracion,
 });
 
-type Config = {
-  monto_comida_diario: number;
-  umbral_finanzas: number;
-  dia_deposito: string;
-  email_compras: string;
-  dias_comprobacion_atrasada: number;
-  dias_autorizacion_pendiente: number;
-  dias_recordatorio_viaje: number;
-  notif_email_activo: boolean;
-  notif_email_destinatarios: string;
-  smtp_servidor: string;
-  smtp_puerto: number;
-  smtp_usuario: string;
-  smtp_password: string;
-  smtp_cifrado: string;
-  notif_plataforma_activo: boolean;
-  revision_automatica_activo: boolean;
-  bloquear_folio_monto_hotel: boolean;
-};
-
-const CONFIG_DEFAULTS: Config = {
-  monto_comida_diario: 450,
-  umbral_finanzas: 5000,
-  dia_deposito: "Viernes",
-  email_compras: "compras@cklass.com",
-  dias_comprobacion_atrasada: 7,
-  dias_autorizacion_pendiente: 3,
-  dias_recordatorio_viaje: 2,
-  notif_email_activo: true,
-  notif_email_destinatarios: "",
-  smtp_servidor: "",
-  smtp_puerto: 587,
-  smtp_usuario: "",
-  smtp_password: "",
-  smtp_cifrado: "TLS",
-  notif_plataforma_activo: true,
-  revision_automatica_activo: true,
-  bloquear_folio_monto_hotel: false,
-};
-
 // Vista de apoyo (solo lectura): correos informativos "enviados" (simulados, aún sin
 // servidor de correo) y bitácora de eventos. Con la base de datos conectada, los logs
 // se guardan en una tabla `logs`.
 function BitacoraNotificaciones() {
-  const [correos] = useLocalStorage<CorreoSimulado[]>(KEYS.correos, []);
-  const [logs] = useLocalStorage<LogEvento[]>(KEYS.logs, []);
-  const [users] = useLocalStorage<User[]>(KEYS.users, []);
+  const correos = lista(useCorreos().data);
+  const logs = lista(useLogs({ limit: 25 }).data);
+  const users = lista(useUsuarios().data);
   const [correo, setCorreo] = useState<CorreoSimulado | null>(null);
   const nombre = (id: string | null) => users.find((u) => u.id === id)?.nombre ?? "—";
   const fh = (iso: string) => new Date(iso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" });
@@ -178,54 +143,57 @@ function BitacoraNotificaciones() {
 }
 
 function Configuracion() {
-  const { hasPerm, role, user } = useAuth();
-  const [config, setConfig] = useLocalStorage<Config>(KEYS.config, CONFIG_DEFAULTS);
-  const [sociedades, setSociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
-  const [roles, setRoles] = useLocalStorage<Role[]>(KEYS.roles, []);
-  const [users] = useLocalStorage<User[]>(KEYS.users, []);
-  const [draft, setDraft] = useState<Config>(config);
+  const { hasPerm, role } = useAuth();
+  const { data: config } = useConfig();
+  const sociedades = lista(useCatalogos().data?.sociedades);
+  const roles = lista(useRoles().data);
+  const users = lista(useUsuarios().data);
+  const [draft, setDraft] = useState<Config>({ ...CONFIG_DEFAULTS, smtp_password: "" });
   const [edit, setEdit] = useState<Sociedad | null>(null);
   const [editRole, setEditRole] = useState<{ nombre: string; copyFrom: number } | null>(null);
+  useEffect(() => {
+    if (config) setDraft({ ...CONFIG_DEFAULTS, smtp_password: "", ...config });
+  }, [config]);
+
+  const guardarCfg = useApiMutation((c: Config) => api.put("/config", { ...c, smtp_password: c.smtp_password || undefined }), {
+    onSuccess: () => toast.success("Configuración guardada."),
+  });
+  const guardarSoc = useApiMutation(
+    (s: Sociedad) => (s.id === 0 ? api.post("/sociedades", s) : api.put(`/sociedades/${s.id}`, s)),
+    {
+      onSuccess: () => {
+        toast.success("Sociedad guardada.");
+        setEdit(null);
+      },
+    },
+  );
+  const crearRol = useApiMutation(
+    (v: { nombre: string; copiarDe: number }) => api.post("/roles", v),
+    {
+      onSuccess: (_r, v) => {
+        toast.success(`Rol "${v.nombre}" creado. Ajusta sus permisos en Permisos.`);
+        setEditRole(null);
+      },
+    },
+  );
+  const borrarRol = useApiMutation((id: number) => api.del(`/roles/${id}`), {
+    onSuccess: () => toast.success("Rol eliminado."),
+  });
 
   if (!hasPerm("configurar_montos")) {
     return <div className="ckl-card p-8 text-center text-sm">Sin permiso para acceder.</div>;
   }
 
-  const saveCfg = () => {
-    // El bloqueo por monto de hotel queda en la bitácora cuando cambia.
-    const antes = !!config.bloquear_folio_monto_hotel;
-    const despues = !!draft.bloquear_folio_monto_hotel;
-    if (antes !== despues) {
-      registrarLog("config_bloqueo_monto_hotel", "config", "bloquear_folio_monto_hotel", user?.id ?? null, {
-        antes,
-        despues,
-      });
-    }
-    setConfig(draft);
-    toast.success("Configuración guardada.");
-  };
+  const saveCfg = () => guardarCfg.mutate(draft);
 
-  const saveSoc = (s: Sociedad) => {
-    if (s.id === 0) {
-      const newId = Math.max(0, ...sociedades.map((x) => x.id)) + 1;
-      setSociedades([...sociedades, { ...s, id: newId }]);
-    } else {
-      setSociedades(sociedades.map((x) => x.id === s.id ? s : x));
-    }
-    toast.success("Sociedad guardada.");
-    setEdit(null);
-  };
+  const saveSoc = (s: Sociedad) => guardarSoc.mutate(s);
 
   const saveRole = () => {
     if (!editRole) return;
     const nombre = slugifyRole(editRole.nombre);
     if (!nombre) return showErrorDialog("Captura un nombre para el rol.");
     if (roles.some((r) => r.nombre === nombre)) return showErrorDialog("Ya existe un rol con ese nombre.");
-    const template = roles.find((r) => r.id === editRole.copyFrom);
-    const newId = Math.max(0, ...roles.map((r) => r.id)) + 1;
-    setRoles([...roles, { id: newId, nombre, permisos: { ...(template?.permisos ?? {}) } }]);
-    toast.success(`Rol "${nombre}" creado. Ajusta sus permisos en Permisos.`);
-    setEditRole(null);
+    crearRol.mutate({ nombre, copiarDe: editRole.copyFrom });
   };
 
   const deleteRole = (r: Role) => {
@@ -236,8 +204,7 @@ function Configuracion() {
       );
     }
     if (!confirm(`¿Eliminar el rol "${r.nombre}"? Esta acción no se puede deshacer.`)) return;
-    setRoles(roles.filter((x) => x.id !== r.id));
-    toast.success("Rol eliminado.");
+    borrarRol.mutate(r.id);
   };
 
   return (
@@ -452,7 +419,7 @@ function Configuracion() {
                 <input
                   type="password"
                   className="ckl-input"
-                  value={draft.smtp_password}
+                  value={draft.smtp_password ?? ""}
                   onChange={(e) => setDraft({ ...draft, smtp_password: e.target.value })}
                 />
               </div>

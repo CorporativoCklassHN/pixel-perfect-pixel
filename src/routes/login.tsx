@@ -4,15 +4,8 @@ import { toast } from "sonner";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
-import {
-  KEYS,
-  lsGet,
-  lsSet,
-  uid,
-  generateResetCode,
-  resetPasswordWithCode,
-  type Sociedad,
-} from "@/lib/store";
+import { api, ApiError, reportApiError } from "@/lib/api";
+import { lista, useApiMutation, useCatalogos } from "@/lib/queries";
 import cklassLogo from "@/cklass-logo.png";
 import imagenInicio from "@/imagen-inicio.png";
 
@@ -39,13 +32,17 @@ function LoginPage() {
     if (user) navigate({ to: "/dashboard" });
   }, [user, navigate]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (login(identifier, pass)) {
-      toast.success(`Bienvenido`);
-      navigate({ to: "/dashboard" });
-    } else {
-      showErrorDialog("Credenciales incorrectas.");
+    try {
+      if (await login(identifier, pass)) {
+        toast.success(`Bienvenido`);
+        navigate({ to: "/dashboard" });
+      } else {
+        showErrorDialog("Credenciales incorrectas.");
+      }
+    } catch (err) {
+      reportApiError(err);
     }
   };
 
@@ -155,12 +152,26 @@ function LoginPage() {
 }
 
 function PreAltaForm({ onBack }: { onBack: () => void }) {
-  const sociedades = lsGet<Sociedad[]>(KEYS.sociedades, []);
+  const { data: cat } = useCatalogos();
+  const sociedades = lista(cat?.sociedades);
   const [f, setF] = useState({
     nombre: "", correo: "", rfc: "", banco: "", cuenta: "", clabe: "",
-    sociedad: sociedades[0]?.nombre ?? "", password: "", confirm: "",
+    sociedad: "", password: "", confirm: "",
   });
   const set = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }));
+  const sociedadSel = f.sociedad || sociedades[0]?.nombre || "";
+  const enviar = useApiMutation(
+    () => {
+      const { confirm: _c, ...resto } = f;
+      return api.post("/prealtas", { ...resto, sociedad: sociedadSel });
+    },
+    {
+      onSuccess: () => {
+        toast.success("Pre-Registro enviado.");
+        onBack();
+      },
+    },
+  );
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,11 +183,7 @@ function PreAltaForm({ onBack }: { onBack: () => void }) {
       showErrorDialog("Las contraseñas no coinciden.");
       return;
     }
-    const list = lsGet<unknown[]>(KEYS.prealtas, []);
-    list.push({ id: uid("pa_"), ...f, status: "pendiente", created_at: new Date().toISOString() });
-    lsSet(KEYS.prealtas, list);
-    toast.success("Pre-Registro enviado.");
-    onBack();
+    enviar.mutate();
   };
 
   return (
@@ -198,7 +205,7 @@ function PreAltaForm({ onBack }: { onBack: () => void }) {
         ))}
         <div className="col-span-2">
           <label className="ckl-label">Sociedad</label>
-          <select className="ckl-input" value={f.sociedad} onChange={(e) => set("sociedad", e.target.value)}>
+          <select className="ckl-input" value={sociedadSel} onChange={(e) => set("sociedad", e.target.value)}>
             {sociedades.map((s) => <option key={s.id} value={s.nombre}>{s.nombre}</option>)}
           </select>
         </div>
@@ -224,16 +231,38 @@ function RecuperarForm({ onBack }: { onBack: () => void }) {
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
 
+  const solicitar = useApiMutation(
+    () => api.post<{ code: string; correo: string }>("/auth/reset/solicitar", { identifier }),
+    {
+      silencioso: true,
+      onSuccess: (r) => {
+        setDemoCode(r.code);
+        toast.success(`Código enviado a ${r.correo}`);
+        setStep("codigo");
+      },
+    },
+  );
+  const confirmar = useApiMutation(
+    () => api.post("/auth/reset/confirmar", { identifier, code, nueva: newPass }),
+    {
+      onSuccess: () => {
+        toast.success("Contraseña actualizada. Ya puedes iniciar sesión.");
+        onBack();
+      },
+    },
+  );
+
   const handleSolicitar = (e: React.FormEvent) => {
     e.preventDefault();
-    const result = generateResetCode(identifier);
-    if (!result) {
-      showErrorDialog("No encontramos una cuenta activa con ese RFC/usuario.");
-      return;
-    }
-    setDemoCode(result.code);
-    toast.success(`Código enviado a ${result.user.correo}`);
-    setStep("codigo");
+    solicitar.mutate(undefined, {
+      onError: (err) => {
+        if (err instanceof ApiError && err.status === 404) {
+          showErrorDialog("No encontramos una cuenta activa con ese RFC/usuario.");
+        } else {
+          reportApiError(err);
+        }
+      },
+    });
   };
 
   const handleCambiar = (e: React.FormEvent) => {
@@ -246,12 +275,7 @@ function RecuperarForm({ onBack }: { onBack: () => void }) {
       showErrorDialog("Las contraseñas no coinciden.");
       return;
     }
-    if (resetPasswordWithCode(identifier, code, newPass)) {
-      toast.success("Contraseña actualizada. Ya puedes iniciar sesión.");
-      onBack();
-    } else {
-      showErrorDialog("Código inválido o expirado.");
-    }
+    confirmar.mutate();
   };
 
   return (
