@@ -9,66 +9,36 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as PortalRouteImport } from './routes/_portal'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as PortalComprobacionRouteImport } from './routes/_portal.comprobacion'
-import { Route as PortalConfiguracionRouteImport } from './routes/_portal.configuracion'
-import { Route as PortalConveniosRouteImport } from './routes/_portal.convenios'
-import { Route as PortalDashboardRouteImport } from './routes/_portal.dashboard'
-import { Route as PortalEstatusRouteImport } from './routes/_portal.estatus'
-import { Route as PortalPermisosRouteImport } from './routes/_portal.permisos'
-import { Route as PortalReportesRouteImport } from './routes/_portal.reportes'
-import { Route as PortalSolicitarRouteImport } from './routes/_portal.solicitar'
+import { Route as PortalRouteImport } from './routes/_portal'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as PortalUsuariosRouteImport } from './routes/_portal.usuarios'
+import { Route as PortalSolicitarRouteImport } from './routes/_portal.solicitar'
+import { Route as PortalReportesRouteImport } from './routes/_portal.reportes'
+import { Route as PortalPermisosRouteImport } from './routes/_portal.permisos'
+import { Route as PortalEstatusRouteImport } from './routes/_portal.estatus'
+import { Route as PortalDashboardRouteImport } from './routes/_portal.dashboard'
+import { Route as PortalConveniosRouteImport } from './routes/_portal.convenios'
+import { Route as PortalConfiguracionRouteImport } from './routes/_portal.configuracion'
+import { Route as PortalComprobacionRouteImport } from './routes/_portal.comprobacion'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PortalRoute = PortalRouteImport.update({
   id: '/_portal',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PortalComprobacionRoute = PortalComprobacionRouteImport.update({
-  id: '/comprobacion',
-  path: '/comprobacion',
-  getParentRoute: () => PortalRoute,
-} as any)
-const PortalConfiguracionRoute = PortalConfiguracionRouteImport.update({
-  id: '/configuracion',
-  path: '/configuracion',
-  getParentRoute: () => PortalRoute,
-} as any)
-const PortalConveniosRoute = PortalConveniosRouteImport.update({
-  id: '/convenios',
-  path: '/convenios',
-  getParentRoute: () => PortalRoute,
-} as any)
-const PortalDashboardRoute = PortalDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => PortalRoute,
-} as any)
-const PortalEstatusRoute = PortalEstatusRouteImport.update({
-  id: '/estatus',
-  path: '/estatus',
-  getParentRoute: () => PortalRoute,
-} as any)
-const PortalPermisosRoute = PortalPermisosRouteImport.update({
-  id: '/permisos',
-  path: '/permisos',
-  getParentRoute: () => PortalRoute,
-} as any)
-const PortalReportesRoute = PortalReportesRouteImport.update({
-  id: '/reportes',
-  path: '/reportes',
+const PortalUsuariosRoute = PortalUsuariosRouteImport.update({
+  id: '/usuarios',
+  path: '/usuarios',
   getParentRoute: () => PortalRoute,
 } as any)
 const PortalSolicitarRoute = PortalSolicitarRouteImport.update({
@@ -76,9 +46,39 @@ const PortalSolicitarRoute = PortalSolicitarRouteImport.update({
   path: '/solicitar',
   getParentRoute: () => PortalRoute,
 } as any)
-const PortalUsuariosRoute = PortalUsuariosRouteImport.update({
-  id: '/usuarios',
-  path: '/usuarios',
+const PortalReportesRoute = PortalReportesRouteImport.update({
+  id: '/reportes',
+  path: '/reportes',
+  getParentRoute: () => PortalRoute,
+} as any)
+const PortalPermisosRoute = PortalPermisosRouteImport.update({
+  id: '/permisos',
+  path: '/permisos',
+  getParentRoute: () => PortalRoute,
+} as any)
+const PortalEstatusRoute = PortalEstatusRouteImport.update({
+  id: '/estatus',
+  path: '/estatus',
+  getParentRoute: () => PortalRoute,
+} as any)
+const PortalDashboardRoute = PortalDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => PortalRoute,
+} as any)
+const PortalConveniosRoute = PortalConveniosRouteImport.update({
+  id: '/convenios',
+  path: '/convenios',
+  getParentRoute: () => PortalRoute,
+} as any)
+const PortalConfiguracionRoute = PortalConfiguracionRouteImport.update({
+  id: '/configuracion',
+  path: '/configuracion',
+  getParentRoute: () => PortalRoute,
+} as any)
+const PortalComprobacionRoute = PortalComprobacionRouteImport.update({
+  id: '/comprobacion',
+  path: '/comprobacion',
   getParentRoute: () => PortalRoute,
 } as any)
 
@@ -174,11 +174,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_portal': {
@@ -188,60 +188,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PortalRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_portal/comprobacion': {
-      id: '/_portal/comprobacion'
-      path: '/comprobacion'
-      fullPath: '/comprobacion'
-      preLoaderRoute: typeof PortalComprobacionRouteImport
-      parentRoute: typeof PortalRoute
-    }
-    '/_portal/configuracion': {
-      id: '/_portal/configuracion'
-      path: '/configuracion'
-      fullPath: '/configuracion'
-      preLoaderRoute: typeof PortalConfiguracionRouteImport
-      parentRoute: typeof PortalRoute
-    }
-    '/_portal/convenios': {
-      id: '/_portal/convenios'
-      path: '/convenios'
-      fullPath: '/convenios'
-      preLoaderRoute: typeof PortalConveniosRouteImport
-      parentRoute: typeof PortalRoute
-    }
-    '/_portal/dashboard': {
-      id: '/_portal/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof PortalDashboardRouteImport
-      parentRoute: typeof PortalRoute
-    }
-    '/_portal/estatus': {
-      id: '/_portal/estatus'
-      path: '/estatus'
-      fullPath: '/estatus'
-      preLoaderRoute: typeof PortalEstatusRouteImport
-      parentRoute: typeof PortalRoute
-    }
-    '/_portal/permisos': {
-      id: '/_portal/permisos'
-      path: '/permisos'
-      fullPath: '/permisos'
-      preLoaderRoute: typeof PortalPermisosRouteImport
-      parentRoute: typeof PortalRoute
-    }
-    '/_portal/reportes': {
-      id: '/_portal/reportes'
-      path: '/reportes'
-      fullPath: '/reportes'
-      preLoaderRoute: typeof PortalReportesRouteImport
+    '/_portal/usuarios': {
+      id: '/_portal/usuarios'
+      path: '/usuarios'
+      fullPath: '/usuarios'
+      preLoaderRoute: typeof PortalUsuariosRouteImport
       parentRoute: typeof PortalRoute
     }
     '/_portal/solicitar': {
@@ -251,11 +209,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PortalSolicitarRouteImport
       parentRoute: typeof PortalRoute
     }
-    '/_portal/usuarios': {
-      id: '/_portal/usuarios'
-      path: '/usuarios'
-      fullPath: '/usuarios'
-      preLoaderRoute: typeof PortalUsuariosRouteImport
+    '/_portal/reportes': {
+      id: '/_portal/reportes'
+      path: '/reportes'
+      fullPath: '/reportes'
+      preLoaderRoute: typeof PortalReportesRouteImport
+      parentRoute: typeof PortalRoute
+    }
+    '/_portal/permisos': {
+      id: '/_portal/permisos'
+      path: '/permisos'
+      fullPath: '/permisos'
+      preLoaderRoute: typeof PortalPermisosRouteImport
+      parentRoute: typeof PortalRoute
+    }
+    '/_portal/estatus': {
+      id: '/_portal/estatus'
+      path: '/estatus'
+      fullPath: '/estatus'
+      preLoaderRoute: typeof PortalEstatusRouteImport
+      parentRoute: typeof PortalRoute
+    }
+    '/_portal/dashboard': {
+      id: '/_portal/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof PortalDashboardRouteImport
+      parentRoute: typeof PortalRoute
+    }
+    '/_portal/convenios': {
+      id: '/_portal/convenios'
+      path: '/convenios'
+      fullPath: '/convenios'
+      preLoaderRoute: typeof PortalConveniosRouteImport
+      parentRoute: typeof PortalRoute
+    }
+    '/_portal/configuracion': {
+      id: '/_portal/configuracion'
+      path: '/configuracion'
+      fullPath: '/configuracion'
+      preLoaderRoute: typeof PortalConfiguracionRouteImport
+      parentRoute: typeof PortalRoute
+    }
+    '/_portal/comprobacion': {
+      id: '/_portal/comprobacion'
+      path: '/comprobacion'
+      fullPath: '/comprobacion'
+      preLoaderRoute: typeof PortalComprobacionRouteImport
       parentRoute: typeof PortalRoute
     }
   }

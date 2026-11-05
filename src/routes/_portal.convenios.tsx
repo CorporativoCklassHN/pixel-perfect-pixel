@@ -2,18 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Plus, Search, Edit2, Ban, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth, useLocalStorage } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
+import { lista, useApiMutation, useConvenios, useLogs, useUsuarios } from "@/lib/queries";
 import { showErrorDialog } from "@/components/ErrorDialog";
-import {
-  KEYS,
-  ESTADOS_MX,
-  registrarLog,
-  sincronizarCatalogoConvenios,
-  uid,
-  type Convenio,
-  type LogEvento,
-  type User,
-} from "@/lib/store";
+import { ESTADOS_MX, type Convenio, type LogEvento } from "@/lib/store";
 
 export const Route = createFileRoute("/_portal/convenios")({
   head: () => ({ meta: [{ title: "Convenios — CKL" }] }),
@@ -81,12 +74,12 @@ function vacio(): Convenio {
 
 // Altas, bajas y modificaciones de los convenios con hoteles (Compras Corporativas).
 // La baja es lógica (se conserva el registro con motivo y fecha) y todo movimiento
-// queda en la bitácora (ckl_logs).
+// queda en la bitácora.
 function Convenios() {
-  const { hasPerm, user } = useAuth();
-  const [convenios, setConvenios] = useLocalStorage<Convenio[]>(KEYS.convenios, []);
-  const [logs] = useLocalStorage<LogEvento[]>(KEYS.logs, []);
-  const [users] = useLocalStorage<User[]>(KEYS.users, []);
+  const { hasPerm } = useAuth();
+  const convenios = lista(useConvenios().data);
+  const logs = lista(useLogs({ entidad: "convenio", limit: 200 }).data);
+  const users = lista(useUsuarios().data);
   const [q, setQ] = useState("");
   const [destino, setDestino] = useState("Todos");
   const [anio, setAnio] = useState("Todos");
@@ -133,6 +126,53 @@ function Convenios() {
       );
   }, [convenios, q, destino, anio, estatus]);
 
+  const cuerpo = (c: Convenio) => ({
+    anio: c.anio,
+    tipo_sucursal: c.tipo_sucursal,
+    no_sucursal: c.no_sucursal,
+    destino: c.destino,
+    estado: c.estado,
+    nombre_comercial: c.nombre_comercial,
+    costo_sencilla: c.costo_sencilla,
+    costo_doble: c.costo_doble,
+    no_proveedor: c.no_proveedor,
+    razon_social: c.razon_social,
+    telefono: c.telefono,
+    contacto: c.contacto,
+    banco: c.banco,
+    correo: c.correo,
+    notas: c.notas,
+  });
+  const alta = useApiMutation((c: Convenio) => api.post("/convenios", cuerpo(c)), {
+    onSuccess: (_r, c) => {
+      toast.success(
+        c.anio === ANIO_ACTUAL
+          ? "Convenio dado de alta (catálogo de hoteles actualizado)."
+          : `Convenio de ${c.anio} guardado como histórico (no se ofrece en Solicitar).`,
+      );
+      setEdit(null);
+    },
+  });
+  const modificar = useApiMutation((c: Convenio) => api.put(`/convenios/${c.id}`, cuerpo(c)), {
+    onSuccess: () => {
+      toast.success("Convenio actualizado (catálogo de hoteles actualizado).");
+      setEdit(null);
+    },
+  });
+  const bajaMut = useApiMutation(
+    (v: { c: Convenio; motivo: string }) => api.post(`/convenios/${v.c.id}/baja`, { motivo: v.motivo }),
+    {
+      onSuccess: () => {
+        toast.success("Convenio dado de baja (el hotel ya no se ofrece en nuevas solicitudes).");
+        setBaja(null);
+      },
+    },
+  );
+  const reactivarMut = useApiMutation((c: Convenio) => api.post(`/convenios/${c.id}/reactivar`), {
+    onSuccess: () =>
+      toast.success("Convenio reactivado (el hotel vuelve a ofrecerse en nuevas solicitudes)."),
+  });
+
   if (!hasPerm("gestionar_convenios")) {
     return <div className="ckl-card p-8 text-center text-sm">Sin permiso para acceder.</div>;
   }
@@ -155,19 +195,6 @@ function Convenios() {
     if (c.correo.trim() && !/^\S+@\S+\.\S+$/.test(c.correo.trim())) {
       return showErrorDialog("El correo no tiene un formato válido.");
     }
-    const duplicado = convenios.some(
-      (x) =>
-        x.id !== c.id &&
-        x.anio === c.anio &&
-        x.destino.trim().toLowerCase() === dest.toLowerCase() &&
-        x.nombre_comercial.trim().toLowerCase() === nombre.toLowerCase(),
-    );
-    if (duplicado) {
-      return showErrorDialog(
-        "Ya existe un convenio de ese hotel en ese destino y año. Modifica el existente.",
-      );
-    }
-
     const limpio: Convenio = {
       ...c,
       nombre_comercial: nombre,
@@ -182,77 +209,24 @@ function Convenios() {
       correo: c.correo.trim(),
       notas: c.notas.trim(),
     };
-    const ahora = new Date().toISOString();
 
     if (!c.id) {
-      const nuevo: Convenio = { ...limpio, id: uid("cv_"), activo: true, creado_at: ahora, actualizado_at: ahora };
-      setConvenios([nuevo, ...convenios]);
-      registrarLog("convenio_alta", "convenio", nuevo.id, user?.id ?? null, {
-        hotel: nuevo.nombre_comercial,
-        destino: nuevo.destino,
-        anio: nuevo.anio,
-        costo_sencilla: nuevo.costo_sencilla,
-        costo_doble: nuevo.costo_doble,
-      });
-      sincronizarCatalogoConvenios(user?.id ?? null);
-      toast.success(
-        nuevo.anio === ANIO_ACTUAL
-          ? "Convenio dado de alta (catálogo de hoteles actualizado)."
-          : `Convenio de ${nuevo.anio} guardado como histórico (no se ofrece en Solicitar).`,
-      );
+      alta.mutate(limpio);
     } else {
       const original = convenios.find((x) => x.id === c.id);
-      const cambios: Record<string, { antes: unknown; despues: unknown }> = {};
-      for (const k of CAMPOS_EDITABLES) {
-        if (original && original[k] !== limpio[k]) cambios[k] = { antes: original[k], despues: limpio[k] };
-      }
-      if (!Object.keys(cambios).length) {
+      const hayCambios = CAMPOS_EDITABLES.some((k) => original && original[k] !== limpio[k]);
+      if (!hayCambios) {
         toast.message("No hay cambios que guardar.");
         setEdit(null);
         return;
       }
-      setConvenios(convenios.map((x) => (x.id === c.id ? { ...limpio, actualizado_at: ahora } : x)));
-      registrarLog("convenio_modificacion", "convenio", c.id, user?.id ?? null, {
-        hotel: limpio.nombre_comercial,
-        cambios,
-      });
-      sincronizarCatalogoConvenios(user?.id ?? null);
-      toast.success("Convenio actualizado (catálogo de hoteles actualizado).");
+      modificar.mutate(limpio);
     }
-    setEdit(null);
   };
 
-  const darBaja = (c: Convenio, motivo: string) => {
-    const ahora = new Date().toISOString();
-    setConvenios(
-      convenios.map((x) =>
-        x.id === c.id
-          ? { ...x, activo: false, baja_motivo: motivo.trim() || undefined, baja_fecha: ahora, actualizado_at: ahora }
-          : x,
-      ),
-    );
-    registrarLog("convenio_baja", "convenio", c.id, user?.id ?? null, {
-      hotel: c.nombre_comercial,
-      motivo: motivo.trim(),
-    });
-    sincronizarCatalogoConvenios(user?.id ?? null);
-    toast.success("Convenio dado de baja (el hotel ya no se ofrece en nuevas solicitudes).");
-    setBaja(null);
-  };
+  const darBaja = (c: Convenio, motivo: string) => bajaMut.mutate({ c, motivo: motivo.trim() });
 
-  const reactivar = (c: Convenio) => {
-    const ahora = new Date().toISOString();
-    setConvenios(
-      convenios.map((x) =>
-        x.id === c.id
-          ? { ...x, activo: true, baja_motivo: undefined, baja_fecha: undefined, actualizado_at: ahora }
-          : x,
-      ),
-    );
-    registrarLog("convenio_reactivacion", "convenio", c.id, user?.id ?? null, { hotel: c.nombre_comercial });
-    sincronizarCatalogoConvenios(user?.id ?? null);
-    toast.success("Convenio reactivado (el hotel vuelve a ofrecerse en nuevas solicitudes).");
-  };
+  const reactivar = (c: Convenio) => reactivarMut.mutate(c);
 
   // Vigente = activo del año en curso (el que se ofrece en Solicitar); Histórico = activo de
   // años anteriores (solo estadísticas/comparativas); Baja = dado de baja.

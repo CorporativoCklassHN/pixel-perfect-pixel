@@ -8,10 +8,15 @@ import { useAuth } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { fmtMoney, tarifaHotel, fmtTarifa, type TipoHabitacion, type Hotel } from "@/lib/store";
+import { api } from "@/lib/api";
 import {
-  KEYS, lsGet, lsSet, fmtMoney, nextFolio, uid, bloqueoNuevaSolicitud, crearRevisionesMontoManual, tarifaHotel, fmtTarifa, type TipoHabitacion,
-  type Hotel, type Solicitud, type ComprobanteGasto, type Autorizacion,
-} from "@/lib/store";
+  useCatalogos, useConfig, useSolicitudDetalle, useBloqueoNuevaSolicitud, useApiMutation,
+  lista, CONFIG_DEFAULTS,
+} from "@/lib/queries";
+
+// Ids locales de filas nuevas (el servidor los conserva o regenera).
+const uid = (p = "") => p + crypto.randomUUID();
 
 export const Route = createFileRoute("/_portal/solicitar")({
   validateSearch: (search: Record<string, unknown>): { editId?: string } => {
@@ -77,7 +82,7 @@ function newDestino(): Destino {
   };
 }
 
-// Reconstruye un Destino guardado en KEYS.destinos, tolerando el esquema
+// Reconstruye un Destino que regresa la API, tolerando el esquema
 // anterior (hotel_monto/hotel_manual de un solo hotel) para poder editar
 // solicitudes creadas antes de que existiera el arreglo `hoteles`.
 function normalizeDestino(raw: any): Destino {
@@ -125,68 +130,65 @@ function Solicitar() {
   const { user } = useAuth();
   const nav = useNavigate();
   const { editId } = Route.useSearch();
-  const origenes = lsGet<string[]>(KEYS.origenes, []);
-  const hoteles = lsGet<Hotel[]>(KEYS.hoteles, []);
-  const config = lsGet<{ monto_comida_diario: number; umbral_finanzas: number }>(KEYS.config, { monto_comida_diario: 450, umbral_finanzas: 5000 });
+  const { data: catalogos } = useCatalogos();
+  const origenes = lista(catalogos?.origenes);
+  const hoteles = lista(catalogos?.hoteles);
+  const { data: configData } = useConfig();
+  const config = configData ?? CONFIG_DEFAULTS;
 
   // Solo se puede editar la propia solicitud mientras esté Abierta y sin
   // ninguna autorización/rechazo registrado — mismo criterio que "canEdit" en Estatus.
+  const {
+    data: detalle,
+    isLoading: cargandoDetalle,
+    isError: errorDetalle,
+  } = useSolicitudDetalle(editId);
   const editing = useMemo(() => {
-    if (!editId) return null;
-    const found = lsGet<Solicitud[]>(KEYS.solicitudes, []).find((s) => s.id === editId);
-    if (!found) return null;
-    const autorizaciones = lsGet<Autorizacion[]>(KEYS.autorizaciones, []);
+    if (!editId || !detalle) return null;
+    const found = detalle.solicitud;
     const puedeEditar =
       found.user_id === user?.id &&
       found.estatus === "Abierto" &&
-      !autorizaciones.some((a) => a.solicitud_id === found.id);
+      !detalle.autorizaciones.some((a) => a.solicitud_id === found.id);
     return puedeEditar ? found : null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editId, user]);
+  }, [editId, detalle, user?.id]);
 
   useEffect(() => {
-    if (editId && !editing) {
+    if (!editId || !user) return;
+    if (errorDetalle || (!cargandoDetalle && !editing)) {
       showErrorDialog("Esa solicitud ya no se puede editar.");
       nav({ to: "/estatus" });
     }
-  }, [editId, editing, nav]);
+  }, [editId, editing, cargandoDetalle, errorDetalle, user, nav]);
 
-  // El folio real solo se asigna al guardar (no al abrir el formulario): si se
-  // asignara aquí, dos personas capturando al mismo tiempo verían el mismo
-  // número, y si una de las dos no llega a guardar, ese folio se pierde. Se
-  // calcula con nextFolio() justo antes de escribir en KEYS.solicitudes, así
-  // que refleja lo que exista en ese momento (basado en la hora real de guardado).
-  // Una solicitud nueva (no edición) se bloquea si el usuario tiene 2 o más folios
-  // autorizados sin comprobar por completo: aplica aunque llegue por el menú lateral
-  // o por URL directa, no solo por el botón "Nueva solicitud".
+  // El folio real lo asigna el servidor al guardar. Una solicitud nueva (no edición) se
+  // bloquea si el usuario tiene 2 o más folios autorizados sin comprobar por completo:
+  // aplica aunque llegue por el menú lateral o por URL directa, no solo por el botón
+  // "Nueva solicitud".
+  const { data: bloqueoData } = useBloqueoNuevaSolicitud(!editId);
+  const bloqueoMsg = bloqueoData?.mensaje ?? null;
   useEffect(() => {
-    if (editId || !user) return;
-    const bloqueo = bloqueoNuevaSolicitud(user.id);
-    if (bloqueo) {
-      showErrorDialog(bloqueo);
-      nav({ to: "/comprobacion" });
-    }
+    if (editId || !user || !bloqueoMsg) return;
+    showErrorDialog(bloqueoMsg);
+    nav({ to: "/comprobacion" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editId, user?.id]);
+  }, [editId, user?.id, bloqueoMsg]);
 
-  const [folio, setFolio] = useState<string | null>(() => editing?.folio ?? null);
+  const [folio, setFolio] = useState<string | null>(null);
   const today = new Date().toLocaleDateString("es-MX");
   const todayIso = new Date().toISOString().slice(0, 10);
-  const [origen, setOrigen] = useState(() => editing?.origen ?? origenes[0] ?? "");
-  const [tipo, setTipo] = useState(() => editing?.tipo_viaje ?? TIPOS[0]);
-  const [personas, setPersonasCount] = useState(() => editing?.personas_count ?? 1);
+  const [origenSel, setOrigen] = useState<string | null>(null);
+  const origen = origenSel ?? origenes[0] ?? "";
+  const [tipo, setTipo] = useState(TIPOS[0]);
+  const [personas, setPersonasCount] = useState(1);
   // Un input por viajero (en vez de un solo texto libre) para que capturar
   // varios nombres no dependa de que el usuario use un separador consistente.
-  const [nombresArr, setNombresArr] = useState<string[]>(() => {
-    const inicial = editing?.personas_nombres ?? user?.nombre ?? "";
-    const partes = inicial
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const base = partes.length ? partes : [inicial];
-    const count = editing?.personas_count ?? 1;
-    return Array.from({ length: count }, (_, i) => base[i] ?? "");
-  });
+  const [nombresArr, setNombresArr] = useState<string[]>(() => [editId ? "" : (user?.nombre ?? "")]);
+  // El usuario puede llegar después del primer render: se precarga su nombre si sigue vacío.
+  useEffect(() => {
+    if (editId || !user?.nombre) return;
+    setNombresArr((arr) => (arr.length === 1 && !arr[0] ? [user.nombre] : arr));
+  }, [editId, user?.nombre]);
   const setPersonas = (n: number) => {
     const count = Math.max(1, n);
     setPersonasCount(count);
@@ -196,13 +198,27 @@ function Solicitar() {
       return next;
     });
   };
-  const [motivo, setMotivo] = useState(() => editing?.motivo ?? "");
-  const [destinos, setDestinos] = useState<Destino[]>(() => {
-    if (!editing) return [newDestino()];
-    const stored = lsGet<any[]>(KEYS.destinos, []).filter((d) => d.solicitud_id === editing.id);
-    return stored.length ? stored.map(normalizeDestino) : [newDestino()];
-  });
+  const [motivo, setMotivo] = useState("");
+  const [destinos, setDestinos] = useState<Destino[]>(() => [newDestino()]);
   const [showModal, setShowModal] = useState(false);
+
+  // La solicitud a editar llega de forma asíncrona: se vuelca al formulario una sola vez.
+  const [cargado, setCargado] = useState(false);
+  useEffect(() => {
+    if (!editing || !detalle || cargado) return;
+    setCargado(true);
+    setFolio(editing.folio);
+    setOrigen(editing.origen);
+    setTipo(editing.tipo_viaje);
+    setPersonasCount(editing.personas_count);
+    const partes = (editing.personas_nombres ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    setNombresArr(Array.from({ length: editing.personas_count }, (_, i) => partes[i] ?? ""));
+    setMotivo(editing.motivo);
+    setDestinos(detalle.destinos.length ? detalle.destinos.map(normalizeDestino) : [newDestino()]);
+  }, [editing, detalle, cargado]);
 
   const updateD = (id: string, patch: Partial<Destino>) =>
     setDestinos((arr) => arr.map((d) => (d.id === id ? { ...d, ...patch } : d)));
@@ -248,11 +264,25 @@ function Solicitar() {
 
   const requiresFin = totals.total > config.umbral_finanzas;
 
+  const guardarMut = useApiMutation(
+    (body: unknown) =>
+      editing
+        ? api.put<{ folio: string }>(`/solicitudes/${editing.id}`, body)
+        : api.post<{ folio: string }>("/solicitudes", body),
+    {
+      onSuccess: (res) => {
+        setFolio(res.folio);
+        toast.success(
+          editing ? `Solicitud ${res.folio} actualizada.` : `Solicitud ${res.folio} registrada.`,
+        );
+        setShowModal(true);
+      },
+    },
+  );
+
   const guardar = () => {
-    if (!editing && user) {
-      const bloqueo = bloqueoNuevaSolicitud(user.id);
-      if (bloqueo) return showErrorDialog(bloqueo);
-    }
+    if (guardarMut.isPending) return;
+    if (!editing && bloqueoMsg) return showErrorDialog(bloqueoMsg);
     if (!motivo.trim()) return showErrorDialog("Captura el motivo del viaje.");
     for (let i = 0; i < destinos.length; i++) {
       const d = destinos[i];
@@ -327,130 +357,24 @@ function Solicitar() {
         }
       }
     }
-    const resumen = destinos.map((d) => d.estado).join(" - ");
-    const solId = editing?.id ?? uid("s_");
-    // Se calcula justo aquí, al momento real de guardar (no al abrir el
-    // formulario), para que el número refleje lo último persistido en ese
-    // instante y no se repita entre dos personas capturando a la vez.
-    const folioFinal = editing?.folio ?? nextFolio();
     const nombres = nombresArr.map((n) => n.trim()).filter(Boolean).join(", ");
-
-    const sol: Solicitud = editing
-      ? {
-          ...editing,
-          origen,
-          destino_resumen: `${origen} - ${resumen}`,
-          tipo_viaje: tipo, motivo,
-          personas_count: personas, personas_nombres: nombres,
-          monto_total: totals.total,
-          finanzas_status: requiresFin ? "Pendiente" : "N/A",
-        }
-      : {
-          id: solId, folio: folioFinal, user_id: user!.id, fecha: today,
-          empresa: user!.empresa, origen,
-          destino_resumen: `${origen} - ${resumen}`,
-          tipo_viaje: tipo, motivo,
-          personas_count: personas, personas_nombres: nombres,
-          monto_total: totals.total,
-          jefe_status: "Pendiente",
-          finanzas_status: requiresFin ? "Pendiente" : "N/A",
-          estatus: "Abierto", comprobante_viaje: null,
-          created_at: new Date().toISOString().slice(0, 10),
-        };
-
-    const list = lsGet<Solicitud[]>(KEYS.solicitudes, []);
-    lsSet(KEYS.solicitudes, editing ? list.map((s) => (s.id === solId ? sol : s)) : [sol, ...list]);
-
     // El motivo solo se conserva en las estancias con monto manual distinto al predeterminado.
     const destinosGuardar = destinos.map((d) => ({
       ...d,
-      solicitud_id: solId,
       hoteles: d.hoteles.map((h) => {
         const predeterminado = tarifaHotel(hoteles.find((x) => x.id === h.hotel_id), h.tipo_habitacion);
         const cambia = h.manual && h.monto > 0 && h.monto !== predeterminado;
         return { ...h, motivo_cambio: cambia ? h.motivo_cambio?.trim() || undefined : undefined };
       }),
     }));
-    const dList = lsGet<any[]>(KEYS.destinos, []).filter((d) => d.solicitud_id !== solId);
-    lsSet(KEYS.destinos, [...dList, ...destinosGuardar]);
-
-    const cg = lsGet<ComprobanteGasto[]>(KEYS.comprobantesGasto, []).filter(
-      (c) => c.solicitud_id !== solId,
-    );
-    // Un renglón de comprobación por cada medio de transporte realmente
-    // seleccionado (Avión, Autobús, Uber, Taxi...) en vez de un solo
-    // "Transporte foráneo"/"Transporte local" genérico — así queda claro qué
-    // hay que comprobar. "Otro" se distingue entre foráneo y local porque el
-    // mismo nombre puede repetirse en ambas secciones.
-    const foraneoPorTipo = new Map<string, number>();
-    const localPorTipo = new Map<string, number>();
-    for (const d of destinos) {
-      for (const r of d.foraneo) {
-        const monto = Number(r.monto) || 0;
-        if (monto <= 0) continue;
-        const concepto = r.tipo === "Otro" ? "Otro (foráneo)" : r.tipo;
-        foraneoPorTipo.set(concepto, (foraneoPorTipo.get(concepto) ?? 0) + monto);
-      }
-      for (const r of d.local) {
-        const monto = Number(r.monto) || 0;
-        if (monto <= 0) continue;
-        const concepto = r.tipo === "Otro" ? "Otro (transporte local)" : r.tipo;
-        localPorTipo.set(concepto, (localPorTipo.get(concepto) ?? 0) + monto);
-      }
-    }
-    const transporteCg: ComprobanteGasto[] = [...foraneoPorTipo, ...localPorTipo].map(
-      ([concepto, monto]) => ({
-        id: uid("cg_"),
-        solicitud_id: solId,
-        concepto,
-        monto_solicitado: monto,
-        monto_comprobado: 0,
-        status_renglon: "pendiente",
-      }),
-    );
-
-    const newCg: ComprobanteGasto[] = [
-      {
-        id: uid("cg_"),
-        solicitud_id: solId,
-        concepto: "Hotel",
-        monto_solicitado: totals.hotel,
-        monto_comprobado: 0,
-        status_renglon: "pendiente",
-      },
-      ...transporteCg,
-      {
-        id: uid("cg_"),
-        solicitud_id: solId,
-        concepto: "Comida",
-        monto_solicitado: totals.comida,
-        monto_comprobado: 0,
-        status_renglon: "pendiente",
-      },
-      // La gasolina NO se comprueba (no genera renglón); la caseta sí.
-      ...(totals.caseta > 0
-        ? [{ id: uid("cg_"), solicitud_id: solId, concepto: "Caseta", monto_solicitado: totals.caseta, monto_comprobado: 0, status_renglon: "pendiente" as const }]
-        : []),
-      {
-        id: uid("cg_"),
-        solicitud_id: solId,
-        concepto: "Vales",
-        monto_solicitado: totals.otros,
-        monto_comprobado: 0,
-        status_renglon: "pendiente",
-      },
-    ];
-    lsSet(KEYS.comprobantesGasto, [...cg, ...newCg]);
-
-    // Hoteles con "Monto manual" distinto al predeterminado: Compras recibe alerta en la
-    // campanita y un correo informativo, y decide aceptar o rechazar (con comentario).
-    if (user) crearRevisionesMontoManual({ id: solId, folio: folioFinal }, destinosGuardar, user);
-
-    setFolio(folioFinal);
-    toast.success(
-      editing ? `Solicitud ${folioFinal} actualizada.` : `Solicitud ${folioFinal} registrada.`,
-    );
-    setShowModal(true);
+    guardarMut.mutate({
+      origen,
+      tipo_viaje: tipo,
+      motivo,
+      personas_count: personas,
+      personas_nombres: nombres,
+      destinos: destinosGuardar,
+    });
   };
 
   const esMartes = new Date().getDay() === 2;

@@ -3,19 +3,9 @@ import { useMemo, useState } from "react";
 import { Search, FileSpreadsheet, Mail } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
-import { useAuth, useLocalStorage } from "@/lib/auth";
-import {
-  KEYS,
-  fmtMoney,
-  filterSolicitudesByDateCutoff,
-  filterSolicitudesByOwnership,
-  avanceComprobacion,
-  estatusVisible,
-  type ComprobanteGasto,
-  type Solicitud,
-  type Sociedad,
-  type User,
-} from "@/lib/store";
+import { useAuth } from "@/lib/auth";
+import { lista, useCatalogos, useComprobantes, useSolicitudes, useUsuarios } from "@/lib/queries";
+import { fmtMoney, avanceComprobacion, estatusVisible, type Solicitud } from "@/lib/store";
 import { StatusBadge } from "./_portal.dashboard";
 import { ReporteGasto } from "@/components/portal/GastoPorConcepto";
 
@@ -28,15 +18,15 @@ export const Route = createFileRoute("/_portal/reportes")({
 });
 
 function Reportes() {
-  const { user, role, hasPerm } = useAuth();
+  const { hasPerm } = useAuth();
   const { vista } = Route.useSearch();
   const nav = useNavigate();
   const puedeGasto = hasPerm("ver_gasto_por_concepto");
   const enGasto = vista === "gasto" && puedeGasto;
-  const [solicitudes] = useLocalStorage<Solicitud[]>(KEYS.solicitudes, []);
-  const [users] = useLocalStorage<User[]>(KEYS.users, []);
-  const [sociedades] = useLocalStorage<Sociedad[]>(KEYS.sociedades, []);
-  const [comprobantes] = useLocalStorage<ComprobanteGasto[]>(KEYS.comprobantesGasto, []);
+  const visibleSolicitudes = lista(useSolicitudes().data);
+  const users = lista(useUsuarios().data);
+  const sociedades = lista(useCatalogos().data?.sociedades);
+  const comprobantes = lista(useComprobantes().data);
   const [fi, setFi] = useState("");
   const [ff, setFf] = useState("");
   const [soc, setSoc] = useState("Todas");
@@ -44,13 +34,7 @@ function Reportes() {
   const [venc, setVenc] = useState("Todos");
   const [searched, setSearched] = useState<Solicitud[] | null>(null);
 
-  // Solicitudes visibles según el rol: tope de fecha (4 o 2 meses) + alcance (todo/equipo/propio).
-  const visibleSolicitudes = filterSolicitudesByOwnership(
-    user,
-    role,
-    filterSolicitudesByDateCutoff(solicitudes, role?.nombre),
-    users,
-  );
+  // El servidor ya entrega las solicitudes dentro del alcance y la ventana de fechas del rol.
   const results = searched ?? visibleSolicitudes;
 
   const userName = (id: string) => users.find((u) => u.id === id)?.nombre ?? "—";

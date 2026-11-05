@@ -1,16 +1,15 @@
 import { useState } from "react";
 import { Bell, CheckCircle2, XCircle, Hotel as HotelIcon } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth, useLocalStorage } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
 import { showErrorDialog } from "@/components/ErrorDialog";
+import { api } from "@/lib/api";
+import { lista, useApiMutation, useRevisionesMonto, useUsuarios } from "@/lib/queries";
 import {
-  KEYS,
   fmtMoney,
-  decidirRevision,
   hoyLocal,
   revisionVisible,
   type RevisionMontoManual,
-  type User,
 } from "@/lib/store";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -29,8 +28,10 @@ const ESTADO_UI = {
 // pendientes y las resueltas hoy (al día siguiente desaparecen).
 export function NotificationBell() {
   const { user, hasPerm } = useAuth();
-  const [revs] = useLocalStorage<RevisionMontoManual[]>(KEYS.revisionesMonto, []);
-  const [users] = useLocalStorage<User[]>(KEYS.users, []);
+  const { data: revsData } = useRevisionesMonto({ poll: true });
+  const { data: usersData } = useUsuarios();
+  const revs = lista(revsData);
+  const users = lista(usersData);
   const [abierto, setAbierto] = useState(false);
   const [detalleId, setDetalleId] = useState<string | null>(null);
 
@@ -129,7 +130,7 @@ export function NotificationBell() {
 
 function RevisionDialog({ rev, onClose }: { rev: RevisionMontoManual; onClose: () => void }) {
   const { user } = useAuth();
-  const [users] = useLocalStorage<User[]>(KEYS.users, []);
+  const users = lista(useUsuarios().data);
   const [comentario, setComentario] = useState("");
   const nombre = (id?: string) => users.find((u) => u.id === id)?.nombre ?? "—";
 
@@ -141,23 +142,26 @@ function RevisionDialog({ rev, onClose }: { rev: RevisionMontoManual; onClose: (
   const ui = ESTADO_UI[rev.estado];
   const esPropia = rev.user_id === user?.id;
 
+  const decidirMut = useApiMutation(
+    (decision: "aceptado" | "rechazado") =>
+      api.post(`/revisiones-monto/${rev.id}/decidir`, { decision, comentario }),
+    {
+      onSuccess: (_r, decision) => {
+        toast.success(
+          decision === "aceptado" ? "Cambio de monto aceptado." : "Cambio de monto rechazado.",
+        );
+        onClose();
+      },
+    },
+  );
+
   const decidir = (decision: "aceptado" | "rechazado") => {
     if (!user) return;
     if (decision === "rechazado" && !comentario.trim()) {
       showErrorDialog("Captura un comentario para rechazar el cambio de monto.");
       return;
     }
-    const r = decidirRevision(rev.id, decision, comentario, user.id);
-    if (r === "ya_resuelta") {
-      showErrorDialog("Esta revisión ya fue resuelta por otra persona.");
-    } else if (r === "propia") {
-      showErrorDialog("No puedes revisar tu propia solicitud.");
-    } else if (r === "ok") {
-      toast.success(
-        decision === "aceptado" ? "Cambio de monto aceptado." : "Cambio de monto rechazado.",
-      );
-    }
-    onClose();
+    decidirMut.mutate(decision);
   };
 
   const fila = (k: string, v: React.ReactNode, destacado = false) => (
